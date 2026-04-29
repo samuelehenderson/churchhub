@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useChurches } from '../hooks/useChurches.js';
 import { updateChurch, resetChurch, resetAll } from '../data/store.js';
 import { parseStreamUrl, describeStrategy } from '../data/streams.js';
+import NewChurchForm from '../components/NewChurchForm.jsx';
 import { IconChurch, IconPlay, IconMail } from '../components/Icons.jsx';
 
 const sections = [
@@ -63,11 +64,28 @@ function formToPatch(form) {
   };
 }
 
+// Passcode for unlocking "create new church" — set via VITE_ADMIN_PASSCODE.
+// If no passcode is set, the create flow is hidden entirely.
+const ADMIN_PASSCODE = import.meta.env.VITE_ADMIN_PASSCODE;
+const UNLOCK_KEY = 'churchhub:admin-unlocked:v1';
+
 export default function Admin() {
   const churches = useChurches();
   const [selectedId, setSelectedId] = useState(churches[0]?.id);
   const [section, setSection] = useState('profile');
   const [saved, setSaved] = useState(false);
+
+  // Create-new-church flow.
+  const [unlocked, setUnlocked] = useState(() => {
+    try {
+      return sessionStorage.getItem(UNLOCK_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const [passInput, setPassInput] = useState('');
+  const [passError, setPassError] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const church = churches.find((c) => c.id === selectedId) || churches[0];
   const [form, setForm] = useState(() => churchToForm(church));
@@ -99,18 +117,109 @@ export default function Admin() {
     }
   };
 
+  const tryUnlock = (e) => {
+    e.preventDefault();
+    if (!ADMIN_PASSCODE) {
+      setPassError(true);
+      return;
+    }
+    if (passInput === ADMIN_PASSCODE) {
+      setUnlocked(true);
+      setPassError(false);
+      try {
+        sessionStorage.setItem(UNLOCK_KEY, '1');
+      } catch {}
+    } else {
+      setPassError(true);
+    }
+  };
+
+  const lock = () => {
+    setUnlocked(false);
+    setCreating(false);
+    setPassInput('');
+    try {
+      sessionStorage.removeItem(UNLOCK_KEY);
+    } catch {}
+  };
+
   if (!church) return null;
 
   return (
     <div className="page fade-in">
       <div className="section-head" style={{ marginTop: 8 }}>
         <h2>Church admin</h2>
+        {unlocked && (
+          <button className="btn-link" onClick={lock}>Lock</button>
+        )}
       </div>
 
+      {/* Unlock card — only shows if a passcode is configured */}
+      {ADMIN_PASSCODE && !unlocked && (
+        <form
+          className="card"
+          onSubmit={tryUnlock}
+          style={{ marginBottom: 18, display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}
+        >
+          <div className="field" style={{ flex: 1, minWidth: 220, marginBottom: 0 }}>
+            <label>Owner passcode</label>
+            <input
+              type="password"
+              value={passInput}
+              onChange={(e) => { setPassInput(e.target.value); setPassError(false); }}
+              placeholder="Enter passcode to add a new church"
+            />
+            {passError && (
+              <p style={{ fontSize: '0.82rem', color: 'var(--rose)', marginTop: 6 }}>
+                Incorrect passcode.
+              </p>
+            )}
+          </div>
+          <button type="submit" className="btn btn-primary">Unlock</button>
+        </form>
+      )}
+
+      {/* Create-new-church flow (only visible when unlocked) */}
+      {unlocked && creating && (
+        <div style={{ marginBottom: 24 }}>
+          <NewChurchForm
+            onCreated={(c) => {
+              setCreating(false);
+              if (c?.id) setSelectedId(c.id);
+            }}
+            onCancel={() => setCreating(false)}
+          />
+        </div>
+      )}
+
+      {unlocked && !creating && (
+        <div
+          className="card"
+          style={{
+            marginBottom: 18,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            background: 'var(--cream)',
+            borderColor: 'rgba(200, 155, 60, 0.35)'
+          }}
+        >
+          <div>
+            <strong style={{ color: 'var(--gold-deep)' }}>Owner mode unlocked.</strong>
+            <span style={{ color: 'var(--ink-soft)', marginLeft: 8 }}>
+              You can add churches directly to the database.
+            </span>
+          </div>
+          <button className="btn btn-gold btn-sm" onClick={() => setCreating(true)}>
+            + Add new church
+          </button>
+        </div>
+      )}
+
       <div className="banner">
-        <strong>Local preview mode.</strong> Your edits save to this browser
-        (<code>localStorage</code>) so you can iterate freely. They sync across pages
-        instantly. Connect a backend later and changes will save to your real database.
+        <strong>Editing existing churches:</strong> Changes save to this browser
+        (<code>localStorage</code>) only — they don't update what other visitors see.
+        For shared edits, use the Supabase dashboard. Auth + real saves coming soon.
       </div>
 
       <div className="filter-bar" style={{ marginBottom: 18 }}>

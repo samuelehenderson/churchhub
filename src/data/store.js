@@ -164,6 +164,73 @@ export function resetAll() {
   resetChurch(null);
 }
 
+// ---------- Supabase writes ----------
+// These write directly to the database (unlike updateChurch which is local-only for now).
+
+// Convert our camelCase shape back into snake_case for Postgres.
+function toRow(church) {
+  return {
+    id: church.id,
+    name: church.name,
+    city: church.city,
+    state: church.state,
+    denomination: church.denomination,
+    size: church.size,
+    description: church.description,
+    address: church.address,
+    lat: church.lat,
+    lng: church.lng,
+    service_times: church.serviceTimes || [],
+    online: !!church.online,
+    is_live: !!church.isLive,
+    live_title: church.liveTitle,
+    live_channel_url: church.liveChannelUrl,
+    livestream_url: church.livestreamUrl,
+    sermon_videos: church.sermonVideos || [],
+    tags: church.tags || [],
+    ministries: church.ministries || [],
+    contact: church.contact || {},
+    website: church.website,
+    socials: church.socials || {},
+    logo_color: church.logoColor
+  };
+}
+
+// Insert a new church row in Supabase.
+// Returns { data, error } — caller handles UI feedback.
+export async function createChurch(church) {
+  if (!isSupabaseConfigured) {
+    return { data: null, error: new Error('Supabase is not configured.') };
+  }
+  const { data, error } = await supabase
+    .from('churches')
+    .insert([toRow(church)])
+    .select()
+    .single();
+
+  if (!error) {
+    // Refresh the local cache by re-fetching everything.
+    fetchPromise = null;
+    serverChurches = null;
+    await loadChurches();
+  }
+  return { data, error };
+}
+
+// Delete a church row in Supabase.
+export async function deleteChurchFromServer(id) {
+  if (!isSupabaseConfigured) {
+    return { error: new Error('Supabase is not configured.') };
+  }
+  const { error } = await supabase.from('churches').delete().eq('id', id);
+  if (!error) {
+    fetchPromise = null;
+    serverChurches = null;
+    await loadChurches();
+  }
+  return { error };
+}
+
 // ---------- derived lookups ----------
 // Backward-compatible static exports — snapshots taken at module load from seed data.
 // Live values are also reflected because Directory rebuilds these in-memo from useChurches().
