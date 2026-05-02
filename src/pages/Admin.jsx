@@ -20,7 +20,34 @@ const baseSections = [
   { key: 'sermons', label: 'Sermons' },
   { key: 'ministries', label: 'Ministries' },
   { key: 'socials', label: 'Social media' },
+  { key: 'engage', label: 'Engagement buttons' },
   { key: 'contact', label: 'Contact info' }
+];
+
+// The four canonical engagement buttons that appear on every profile.
+// Add a fifth here later if needed — both admin form + Profile read from
+// this list, so adding a new entry is the only change needed.
+const ENGAGEMENT_BUTTONS = [
+  {
+    key: 'prayer',
+    label: 'Request prayer',
+    helper: 'Where visitors can submit a prayer request — your form, contact email, or a Tally / Google Form link.'
+  },
+  {
+    key: 'visitor',
+    label: "I'm new here",
+    helper: "Page introducing your church to first-time visitors (e.g. /im-new)."
+  },
+  {
+    key: 'visit',
+    label: 'Plan a visit',
+    helper: 'Form or page where someone can let you know they\'re coming to a service.'
+  },
+  {
+    key: 'community',
+    label: 'Join online community',
+    helper: 'Discord, Slack, Facebook group, app — wherever your online community lives.'
+  }
 ];
 
 // Build a flat form object from a church record.
@@ -42,6 +69,7 @@ function churchToForm(c) {
     sermons: c.sermonVideos.map((s) => `${s.title} | ${s.date} | ${s.url}`).join('\n'),
     ministries: c.ministries.join(', '),
     socials: cleanSocials,
+    engagementLinks: { ...(c.engagementLinks || {}) },
     phone: c.contact.phone,
     email: c.contact.email,
     website: c.website
@@ -93,9 +121,22 @@ function formToPatch(form, resolvedYouTube) {
       }),
     ministries: form.ministries.split(',').map((m) => m.trim()).filter(Boolean),
     socials: cleanSocials(form.socials),
+    engagementLinks: cleanLinks(form.engagementLinks),
     contact: { phone: form.phone.trim(), email: form.email.trim() },
     website: form.website.trim()
   };
+}
+
+// Trim each URL and drop empties. Bare strings without https:// get the
+// scheme prepended so the link actually opens.
+function cleanLinks(raw) {
+  const out = {};
+  for (const [k, v] of Object.entries(raw || {})) {
+    const trimmed = (v || '').trim();
+    if (!trimmed) continue;
+    out[k] = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  }
+  return out;
 }
 
 // Drop empty entries and normalize each URL (add https://, etc.).
@@ -481,6 +522,43 @@ export default function Admin() {
                       value={form.socials}
                       onChange={(next) => setForm((f) => ({ ...f, socials: next }))}
                     />
+                  </>
+                )}
+
+                {section === 'engage' && (
+                  <>
+                    <h3 style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 400 }}>
+                      Engagement buttons
+                    </h3>
+                    <p style={{ fontSize: '0.88rem', color: 'var(--ink-soft)', marginBottom: 14 }}>
+                      These four buttons appear at the bottom of your church
+                      profile page. Set a URL for each one you want to use —
+                      blank fields are hidden automatically.
+                    </p>
+                    {ENGAGEMENT_BUTTONS.map((b) => (
+                      <div className="field" key={b.key}>
+                        <label>{b.label}</label>
+                        <input
+                          type="url"
+                          value={form.engagementLinks?.[b.key] || ''}
+                          onChange={(e) =>
+                            setForm((f) => ({
+                              ...f,
+                              engagementLinks: {
+                                ...(f.engagementLinks || {}),
+                                [b.key]: e.target.value
+                              }
+                            }))
+                          }
+                          placeholder="https://..."
+                          autoComplete="off"
+                          spellCheck={false}
+                        />
+                        <p style={{ fontSize: '0.78rem', color: 'var(--ink-muted)', marginTop: 4 }}>
+                          {b.helper}
+                        </p>
+                      </div>
+                    ))}
                   </>
                 )}
 

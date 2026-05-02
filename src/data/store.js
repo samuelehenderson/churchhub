@@ -58,6 +58,7 @@ function fromRow(row) {
     contact: row.contact || {},
     website: row.website,
     socials: row.socials || {},
+    engagementLinks: row.engagement_links || {},
     logoColor: row.logo_color
   };
 }
@@ -93,6 +94,7 @@ function toRow(patch) {
     contact: 'contact',
     website: 'website',
     socials: 'socials',
+    engagementLinks: 'engagement_links',
     logoColor: 'logo_color'
   };
   const row = {};

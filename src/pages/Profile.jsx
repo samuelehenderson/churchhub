@@ -88,15 +88,7 @@ export default function Profile() {
             </div>
           </section>
 
-          <section className="profile-section card">
-            <h3>Engage with this church</h3>
-            <div className="engage-grid">
-              <button className="engage-btn"><IconHeart /> Request prayer</button>
-              <button className="engage-btn"><IconWave /> I'm new here</button>
-              <button className="engage-btn"><IconHand /> Plan a visit</button>
-              <button className="engage-btn"><IconUsers /> Join online community</button>
-            </div>
-          </section>
+          <EngagementButtons links={church.engagementLinks} />
         </div>
 
         {/* SIDE COLUMN */}
@@ -141,6 +133,41 @@ export default function Profile() {
         </aside>
       </div>
     </div>
+  );
+}
+
+// Same canonical button list as the Admin form. If the church has a URL set
+// for one of these keys, the button is rendered as a link; entries without a
+// URL are skipped entirely. The whole section is hidden when no URLs exist
+// so we don't show a row of dead buttons.
+const ENGAGE_BUTTONS = [
+  { key: 'prayer',    label: 'Request prayer',       Icon: IconHeart },
+  { key: 'visitor',   label: "I'm new here",         Icon: IconWave },
+  { key: 'visit',     label: 'Plan a visit',         Icon: IconHand },
+  { key: 'community', label: 'Join online community', Icon: IconUsers }
+];
+
+function EngagementButtons({ links }) {
+  const items = ENGAGE_BUTTONS.filter((b) => links?.[b.key]);
+  if (items.length === 0) return null;
+
+  return (
+    <section className="profile-section card">
+      <h3>Engage with this church</h3>
+      <div className="engage-grid">
+        {items.map(({ key, label, Icon }) => (
+          <a
+            key={key}
+            href={links[key]}
+            target="_blank"
+            rel="noreferrer"
+            className="engage-btn"
+          >
+            <Icon /> {label}
+          </a>
+        ))}
+      </div>
+    </section>
   );
 }
 
