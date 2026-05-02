@@ -142,6 +142,156 @@ p { margin: 0 0 0.75em 0; }
 }
 .top-bar-cta:hover { border-color: var(--gold); color: var(--navy); }
 
+/* =========================================================
+   Account menu (top-right when signed in)
+   ========================================================= */
+
+.account-menu { position: relative; }
+.account-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 6px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  font-size: 0.85rem;
+  color: var(--navy-deep);
+  font-weight: 500;
+  transition: border-color 0.15s ease;
+}
+.account-trigger:hover { border-color: var(--gold); }
+.account-avatar {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: var(--navy);
+  color: var(--gold-soft);
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.account-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  min-width: 220px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  padding: 6px;
+  z-index: 50;
+}
+.account-pop-email {
+  padding: 8px 12px;
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+  word-break: break-all;
+}
+.account-pop-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 0.9rem;
+  color: var(--navy-deep);
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-decoration: none;
+}
+.account-pop-item:hover { background: var(--cream); color: var(--navy-deep); }
+.account-pop-item.danger { color: var(--rose); }
+.account-pop-item.danger:hover { background: #fbecdb; }
+
+/* =========================================================
+   Members panel (admin → Members tab)
+   ========================================================= */
+
+.invite-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  padding: 14px;
+  background: var(--cream);
+  border: 1px solid rgba(200, 155, 60, 0.35);
+  border-radius: var(--radius-sm);
+}
+.invite-row .btn { white-space: nowrap; }
+
+.member-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.member-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.member-info { flex: 1; min-width: 0; }
+.member-id {
+  font-size: 0.92rem;
+  color: var(--navy-deep);
+  word-break: break-word;
+}
+.member-meta {
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+  margin-top: 2px;
+}
+.member-row select {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  font-size: 0.85rem;
+}
+
+@media (max-width: 540px) {
+  .invite-row { flex-direction: column; align-items: stretch; }
+  .invite-row .btn { width: 100%; }
+  .member-row { flex-wrap: wrap; }
+}
+
+/* =========================================================
+   Modal (delete church confirmation)
+   ========================================================= */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(16, 37, 54, 0.55);
+  backdrop-filter: blur(2px);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.modal-card {
+  background: var(--bg-elevated);
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  padding: 24px;
+  max-width: 480px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
 .page {
   max-width: var(--maxw);
   margin: 0 auto;

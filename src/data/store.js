@@ -2,34 +2,25 @@
 //
 // Data flow:
 //   1. On app load, fetch all churches from Supabase (one query, cached in memory).
-//   2. Local edits made via Admin overlay on top of the server data (localStorage).
-//      This means an edit shows up immediately for the editor without needing auth.
-//      Once we add auth, updateChurch() will write to Supabase instead.
-//   3. Components subscribe via the useChurches() hook and re-render automatically.
+//   2. Authenticated edits write directly to Supabase via updateChurch() /
+//      deleteChurch() / createChurch(), guarded by Row Level Security policies
+//      defined in supabase/migrations/0002_auth_and_permissions.sql.
+//   3. Components subscribe via the useChurches() hook and re-render
+//      automatically once each write completes.
 //
 // If Supabase isn't configured (no env vars), falls back to the seed file so
-// local dev still works without a database.
+// local dev still works without a database. In that mode all writes no-op.
 //
-// --- Schema additions for the YouTube channel resolver ----------------------
-// Run once on the Supabase `churches` table to back the new fields:
-//
-//   alter table churches
-//     add column if not exists youtube_channel_id           text,
-//     add column if not exists youtube_channel_title        text,
-//     add column if not exists youtube_channel_thumbnail    text,
-//     add column if not exists youtube_channel_original_url text;
-//
-// `live_channel_url` continues to hold the permanent live embed URL
-// (https://www.youtube.com/embed/live_stream?channel=UC...) so existing
-// rendering paths keep working. The new columns let us show the channel
-// name + thumbnail in the UI and re-resolve later if the handle ever
-// changes.
-// ---------------------------------------------------------------------------
+// --- Schema ---------------------------------------------------------------
+// The churches table needs columns for the YouTube channel resolver. See:
+//   supabase/migrations/0001_youtube_channel_columns.sql
+// And the auth/permissions tables + policies live in:
+//   supabase/migrations/0002_auth_and_permissions.sql
+// -------------------------------------------------------------------------
 
 import { churches as seedChurches } from './churches.js';
 import { supabase, isSupabaseConfigured } from './supabase.js';
 
-const STORAGE_KEY = 'churchhub:churches:v1';
 const CACHE_KEY = 'churchhub:server-cache:v1';
 
 // In-memory cache of the server data. Populated by the initial fetch.
@@ -71,23 +62,46 @@ function fromRow(row) {
   };
 }
 
-// ---------- localStorage overlay (unchanged) ----------
-
-function loadOverrides() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
+// Convert our camelCase shape back into snake_case for Postgres. Only includes
+// keys that are actually present in the patch — that way an `updateChurch`
+// call doesn't accidentally null out columns it didn't touch.
+function toRow(patch) {
+  const map = {
+    id: 'id',
+    name: 'name',
+    city: 'city',
+    state: 'state',
+    denomination: 'denomination',
+    size: 'size',
+    description: 'description',
+    address: 'address',
+    lat: 'lat',
+    lng: 'lng',
+    serviceTimes: 'service_times',
+    online: 'online',
+    isLive: 'is_live',
+    liveTitle: 'live_title',
+    liveChannelUrl: 'live_channel_url',
+    youtubeChannelId: 'youtube_channel_id',
+    youtubeChannelTitle: 'youtube_channel_title',
+    youtubeChannelThumbnail: 'youtube_channel_thumbnail',
+    youtubeChannelOriginalUrl: 'youtube_channel_original_url',
+    livestreamUrl: 'livestream_url',
+    sermonVideos: 'sermon_videos',
+    tags: 'tags',
+    ministries: 'ministries',
+    contact: 'contact',
+    website: 'website',
+    socials: 'socials',
+    logoColor: 'logo_color'
+  };
+  const row = {};
+  for (const [k, col] of Object.entries(map)) {
+    if (Object.prototype.hasOwnProperty.call(patch, k)) {
+      row[col] = patch[k];
+    }
   }
-}
-
-function saveOverrides(overrides) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
-  } catch (e) {
-    console.warn('ChurchHub: could not save to localStorage', e);
-  }
+  return row;
 }
 
 // ---------- server cache (so the UI doesn't flash empty on reload) ----------
@@ -107,6 +121,10 @@ function saveCachedServer(churches) {
   } catch (e) {
     console.warn('ChurchHub: could not cache server data', e);
   }
+}
+
+function notifyChange(detail) {
+  window.dispatchEvent(new CustomEvent('churchhub:data-changed', { detail }));
 }
 
 // ---------- public API ----------
@@ -133,11 +151,17 @@ export function loadChurches() {
         serverChurches = data.map(fromRow);
         saveCachedServer(serverChurches);
       }
-      window.dispatchEvent(new CustomEvent('churchhub:data-changed'));
+      notifyChange({});
       return serverChurches;
     });
 
   return fetchPromise;
+}
+
+// Force a re-fetch on next read (used after writes).
+export function invalidateChurches() {
+  fetchPromise = null;
+  serverChurches = null;
 }
 
 // Synchronous accessor used by the React hook. Returns whatever's in memory
@@ -150,78 +174,45 @@ function getServerSnapshot() {
   return seedChurches;
 }
 
-// Merge server data + local edits.
 export function getAllChurches() {
-  const overrides = loadOverrides();
-  return getServerSnapshot().map((c) =>
-    overrides[c.id] ? { ...c, ...overrides[c.id] } : c
-  );
+  return getServerSnapshot();
 }
 
 export function getChurch(id) {
   return getAllChurches().find((c) => c.id === id) || null;
 }
 
-// Save a partial update for one church (still local-only for now — auth comes next).
-export function updateChurch(id, patch) {
-  const overrides = loadOverrides();
-  overrides[id] = { ...(overrides[id] || {}), ...patch };
-  saveOverrides(overrides);
-  window.dispatchEvent(new CustomEvent('churchhub:data-changed', { detail: { id } }));
-  return getChurch(id);
+// ---------- writes (RLS-guarded by Supabase) ----------
+
+// Update an existing church row. Returns { data, error }.
+// Only sends columns that are actually present in `patch` so we never blank
+// out fields we didn't intend to touch.
+export async function updateChurch(id, patch) {
+  if (!isSupabaseConfigured) {
+    return { data: null, error: new Error('Supabase is not configured.') };
+  }
+  const row = toRow(patch);
+  delete row.id; // never overwrite the primary key
+  if (Object.keys(row).length === 0) {
+    return { data: getChurch(id), error: null };
+  }
+
+  const { data, error } = await supabase
+    .from('churches')
+    .update(row)
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) return { data: null, error };
+
+  invalidateChurches();
+  await loadChurches();
+  notifyChange({ id });
+  return { data: fromRow(data), error: null };
 }
 
-// Wipe local edits for one church (or all of them).
-export function resetChurch(id) {
-  const overrides = loadOverrides();
-  if (id) delete overrides[id];
-  else Object.keys(overrides).forEach((k) => delete overrides[k]);
-  saveOverrides(overrides);
-  window.dispatchEvent(new CustomEvent('churchhub:data-changed', { detail: { id: id || null } }));
-}
-
-export function resetAll() {
-  resetChurch(null);
-}
-
-// ---------- Supabase writes ----------
-// These write directly to the database (unlike updateChurch which is local-only for now).
-
-// Convert our camelCase shape back into snake_case for Postgres.
-function toRow(church) {
-  return {
-    id: church.id,
-    name: church.name,
-    city: church.city,
-    state: church.state,
-    denomination: church.denomination,
-    size: church.size,
-    description: church.description,
-    address: church.address,
-    lat: church.lat,
-    lng: church.lng,
-    service_times: church.serviceTimes || [],
-    online: !!church.online,
-    is_live: !!church.isLive,
-    live_title: church.liveTitle,
-    live_channel_url: church.liveChannelUrl,
-    youtube_channel_id: church.youtubeChannelId || null,
-    youtube_channel_title: church.youtubeChannelTitle || null,
-    youtube_channel_thumbnail: church.youtubeChannelThumbnail || null,
-    youtube_channel_original_url: church.youtubeChannelOriginalUrl || null,
-    livestream_url: church.livestreamUrl,
-    sermon_videos: church.sermonVideos || [],
-    tags: church.tags || [],
-    ministries: church.ministries || [],
-    contact: church.contact || {},
-    website: church.website,
-    socials: church.socials || {},
-    logo_color: church.logoColor
-  };
-}
-
-// Insert a new church row in Supabase.
-// Returns { data, error } — caller handles UI feedback.
+// Insert a new church row.
 export async function createChurch(church) {
   if (!isSupabaseConfigured) {
     return { data: null, error: new Error('Supabase is not configured.') };
@@ -232,32 +223,33 @@ export async function createChurch(church) {
     .select()
     .single();
 
-  if (!error) {
-    // Refresh the local cache by re-fetching everything.
-    fetchPromise = null;
-    serverChurches = null;
-    await loadChurches();
-  }
-  return { data, error };
+  if (error) return { data: null, error };
+
+  invalidateChurches();
+  await loadChurches();
+  notifyChange({ id: data.id });
+  return { data: fromRow(data), error: null };
 }
 
-// Delete a church row in Supabase.
-export async function deleteChurchFromServer(id) {
+// Delete a church row.
+export async function deleteChurch(id) {
   if (!isSupabaseConfigured) {
     return { error: new Error('Supabase is not configured.') };
   }
   const { error } = await supabase.from('churches').delete().eq('id', id);
-  if (!error) {
-    fetchPromise = null;
-    serverChurches = null;
-    await loadChurches();
-  }
-  return { error };
+  if (error) return { error };
+
+  invalidateChurches();
+  await loadChurches();
+  notifyChange({ id, deleted: true });
+  return { error: null };
 }
+
+// Back-compat alias — old code imported this name.
+export const deleteChurchFromServer = deleteChurch;
 
 // ---------- derived lookups ----------
 // Backward-compatible static exports — snapshots taken at module load from seed data.
-// Live values are also reflected because Directory rebuilds these in-memo from useChurches().
 export const allStates = [...new Set(seedChurches.map((c) => c.state))].sort();
 export const allDenominations = [...new Set(seedChurches.map((c) => c.denomination))].sort();
 export { allTags } from './churches.js';
