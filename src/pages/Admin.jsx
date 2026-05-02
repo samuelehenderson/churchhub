@@ -9,6 +9,8 @@ import NewChurchForm from '../components/NewChurchForm.jsx';
 import YouTubeChannelInput from '../components/YouTubeChannelInput.jsx';
 import ChurchMembersPanel from '../components/ChurchMembersPanel.jsx';
 import DeleteChurchDialog from '../components/DeleteChurchDialog.jsx';
+import SocialsEditor from '../components/SocialsEditor.jsx';
+import { normalizeSocialUrl } from '../data/socials.jsx';
 import { IconChurch, IconPlay, IconMail } from '../components/Icons.jsx';
 
 const baseSections = [
@@ -17,12 +19,17 @@ const baseSections = [
   { key: 'stream', label: 'Livestream' },
   { key: 'sermons', label: 'Sermons' },
   { key: 'ministries', label: 'Ministries' },
+  { key: 'socials', label: 'Social media' },
   { key: 'contact', label: 'Contact info' }
 ];
 
 // Build a flat form object from a church record.
 function churchToForm(c) {
   const channelInput = c.youtubeChannelOriginalUrl || c.liveChannelUrl || '';
+  // Filter out the legacy '#' placeholder values from seed data.
+  const cleanSocials = Object.fromEntries(
+    Object.entries(c.socials || {}).filter(([, v]) => v && v !== '#')
+  );
   return {
     name: c.name,
     description: c.description,
@@ -34,6 +41,7 @@ function churchToForm(c) {
     liveTitle: c.liveTitle || '',
     sermons: c.sermonVideos.map((s) => `${s.title} | ${s.date} | ${s.url}`).join('\n'),
     ministries: c.ministries.join(', '),
+    socials: cleanSocials,
     phone: c.contact.phone,
     email: c.contact.email,
     website: c.website
@@ -84,9 +92,20 @@ function formToPatch(form, resolvedYouTube) {
         return { title, date, url: embedded.embedUrl || url };
       }),
     ministries: form.ministries.split(',').map((m) => m.trim()).filter(Boolean),
+    socials: cleanSocials(form.socials),
     contact: { phone: form.phone.trim(), email: form.email.trim() },
     website: form.website.trim()
   };
+}
+
+// Drop empty entries and normalize each URL (add https://, etc.).
+function cleanSocials(raw) {
+  const out = {};
+  for (const [k, v] of Object.entries(raw || {})) {
+    const url = normalizeSocialUrl(k, v);
+    if (url) out[k] = url;
+  }
+  return out;
 }
 
 export default function Admin() {
@@ -450,6 +469,18 @@ export default function Admin() {
                       <label>Comma-separated tags</label>
                       <input name="ministries" value={form.ministries} onChange={onChange} />
                     </div>
+                  </>
+                )}
+
+                {section === 'socials' && (
+                  <>
+                    <h3 style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 400 }}>
+                      Social media
+                    </h3>
+                    <SocialsEditor
+                      value={form.socials}
+                      onChange={(next) => setForm((f) => ({ ...f, socials: next }))}
+                    />
                   </>
                 )}
 
