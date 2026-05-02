@@ -8,20 +8,19 @@ import {
 import { IconPlay, IconClock } from './Icons.jsx';
 
 /**
- * Smart embed that picks the right video to show based on church state:
+ * Smart embed that picks the right video to show based on church state.
  *
- * 1. Church has a resolved YouTube channel ID -> always embed
- *    https://www.youtube.com/embed/live_stream?channel=CHANNEL_ID
- *    YouTube itself decides whether to show the active live stream or the
- *    channel's offline fallback / latest upload.
+ * The YouTube `embed/live_stream?channel=…` URL only works when the channel
+ * is currently broadcasting; when offline, that URL renders as
+ * "Video unavailable." So we use it only when we believe the channel is
+ * live, and fall back to the fallback video URL (or a friendly poster)
+ * the rest of the time.
  *
- * 2. Church has a non-YouTube auto-live URL (Vimeo event, etc.) -> embed it.
- *
- * 3. No auto-live URL -> friendly offline poster with the fallback video.
- *
- * When VITE_YOUTUBE_API_KEY is configured we additionally poll the YouTube
- * Data API once per mount to detect whether the channel is currently live, so
- * the "Live Now" badge stays accurate without any admin action.
+ * Live detection sources (in priority order):
+ *   1. YouTube Data API live-status check (when VITE_YOUTUBE_API_KEY is set
+ *      and we have a stored channel ID). Authoritative.
+ *   2. The manual `isLive` flag on the church record. Used as a fallback
+ *      when the API isn't configured, or while the API check is in flight.
  */
 export default function LiveEmbed({ church, autoplayWhenLive = false, showChannelHeader = true }) {
   const {
@@ -36,6 +35,7 @@ export default function LiveEmbed({ church, autoplayWhenLive = false, showChanne
   } = church;
 
   // Auto-detected live status (overrides the manual flag when available).
+  // null = not yet checked, { live: true|false, ... } = check completed.
   const [autoLiveStatus, setAutoLiveStatus] = useState(null);
 
   useEffect(() => {
@@ -54,16 +54,17 @@ export default function LiveEmbed({ church, autoplayWhenLive = false, showChanne
 
   const isLive = autoLiveStatus?.live ?? manualLive;
 
-  // Resolve the embed source URL.
-  // Preference order:
-  //   1. The permanent channel-live embed built from the stored channel ID
-  //   2. Whatever liveChannelUrl is on the record (legacy / non-YouTube)
-  //   3. The fallback livestreamUrl (single video)
+  // Pick the right embed URL based on live state.
+  //   Live:    use the auto-live URL (YouTube channel-live, Vimeo event, etc.)
+  //   Offline: use the fallback video — the live URL would render
+  //            "video unavailable" for most YouTube channels.
   const channelEmbedUrl = youtubeChannelId ? buildLiveEmbedUrl(youtubeChannelId) : null;
-  const sourceUrl = channelEmbedUrl || liveChannelUrl || livestreamUrl;
+  const liveSource = channelEmbedUrl || liveChannelUrl;
+  const offlineSource = livestreamUrl;
+  const sourceUrl = isLive ? (liveSource || offlineSource) : (offlineSource || null);
+
   const parsed = sourceUrl ? parseStreamUrl(sourceUrl) : null;
 
-  // Channel header shown when we have resolved metadata.
   const header =
     showChannelHeader && (youtubeChannelTitle || youtubeChannelThumbnail) ? (
       <ChannelHeader
@@ -74,20 +75,7 @@ export default function LiveEmbed({ church, autoplayWhenLive = false, showChanne
       />
     ) : null;
 
-  // Case A: no auto-follow URL at all and not currently live -> offline poster.
-  if (!isLive && !channelEmbedUrl && !liveChannelUrl) {
-    return (
-      <>
-        {header}
-        <OfflinePoster
-          name={name}
-          serviceTimes={serviceTimes}
-          fallbackUrl={livestreamUrl}
-        />
-      </>
-    );
-  }
-
+  // Nothing to show — friendly poster.
   if (!parsed || !parsed.embedUrl) {
     return (
       <>
@@ -95,7 +83,7 @@ export default function LiveEmbed({ church, autoplayWhenLive = false, showChanne
         <OfflinePoster
           name={name}
           serviceTimes={serviceTimes}
-          fallbackUrl={livestreamUrl}
+          fallbackUrl={offlineSource}
         />
       </>
     );
@@ -111,7 +99,11 @@ export default function LiveEmbed({ church, autoplayWhenLive = false, showChanne
     <>
       {header}
       <div className="video-frame">
-        {isLive && <span className="tag tag-live live-now-badge">Live Now</span>}
+        {isLive ? (
+          <span className="tag tag-live live-now-badge">Live Now</span>
+        ) : (
+          <span className="offline-pill">Latest sermon — not live right now</span>
+        )}
         <iframe
           src={src}
           title={`${name} stream`}
@@ -158,7 +150,9 @@ function OfflinePoster({ name, serviceTimes, fallbackUrl }) {
           {name} isn't live at the moment
         </h3>
         <p className="offline-sub">
-          Stop back during a service time, or watch a recent sermon below.
+          {fallbackUrl
+            ? 'Stop back during a service time, or watch a recent sermon.'
+            : 'Stop back during a service time. The team hasn\'t added a fallback video yet.'}
         </p>
         {fallbackUrl && (
           <a

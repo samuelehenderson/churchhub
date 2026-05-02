@@ -1072,6 +1072,24 @@ p { margin: 0 0 0.75em 0; }
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
 }
 
+.offline-pill {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(16, 37, 54, 0.78);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
 @media (max-width: 480px) {
   .yt-channel-input .yt-input-row {
     flex-direction: column;
