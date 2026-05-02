@@ -25,6 +25,7 @@ const blank = {
   tags: '',                  // comma-separated
   ministries: '',            // comma-separated
   socials: {},               // { platform: url }
+  engagementLinks: {},       // { prayer | visitor | visit | community: url }
   phone: '',
   email: '',
   website: '',
@@ -134,6 +135,15 @@ export default function NewChurchForm({ onCreated, onCancel }) {
       socials: Object.fromEntries(
         Object.entries(form.socials || {})
           .map(([k, v]) => [k, normalizeSocialUrl(k, v)])
+          .filter(([, v]) => v)
+      ),
+      engagementLinks: Object.fromEntries(
+        Object.entries(form.engagementLinks || {})
+          .map(([k, v]) => {
+            const t = (v || '').trim();
+            if (!t) return [k, ''];
+            return [k, /^https?:\/\//i.test(t) ? t : `https://${t}`];
+          })
           .filter(([, v]) => v)
       ),
       logoColor: form.logoColor
