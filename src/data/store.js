@@ -9,6 +9,22 @@
 //
 // If Supabase isn't configured (no env vars), falls back to the seed file so
 // local dev still works without a database.
+//
+// --- Schema additions for the YouTube channel resolver ----------------------
+// Run once on the Supabase `churches` table to back the new fields:
+//
+//   alter table churches
+//     add column if not exists youtube_channel_id           text,
+//     add column if not exists youtube_channel_title        text,
+//     add column if not exists youtube_channel_thumbnail    text,
+//     add column if not exists youtube_channel_original_url text;
+//
+// `live_channel_url` continues to hold the permanent live embed URL
+// (https://www.youtube.com/embed/live_stream?channel=UC...) so existing
+// rendering paths keep working. The new columns let us show the channel
+// name + thumbnail in the UI and re-resolve later if the handle ever
+// changes.
+// ---------------------------------------------------------------------------
 
 import { churches as seedChurches } from './churches.js';
 import { supabase, isSupabaseConfigured } from './supabase.js';
@@ -40,6 +56,10 @@ function fromRow(row) {
     isLive: !!row.is_live,
     liveTitle: row.live_title,
     liveChannelUrl: row.live_channel_url,
+    youtubeChannelId: row.youtube_channel_id || null,
+    youtubeChannelTitle: row.youtube_channel_title || null,
+    youtubeChannelThumbnail: row.youtube_channel_thumbnail || null,
+    youtubeChannelOriginalUrl: row.youtube_channel_original_url || null,
     livestreamUrl: row.livestream_url,
     sermonVideos: row.sermon_videos || [],
     tags: row.tags || [],
@@ -185,6 +205,10 @@ function toRow(church) {
     is_live: !!church.isLive,
     live_title: church.liveTitle,
     live_channel_url: church.liveChannelUrl,
+    youtube_channel_id: church.youtubeChannelId || null,
+    youtube_channel_title: church.youtubeChannelTitle || null,
+    youtube_channel_thumbnail: church.youtubeChannelThumbnail || null,
+    youtube_channel_original_url: church.youtubeChannelOriginalUrl || null,
     livestream_url: church.livestreamUrl,
     sermon_videos: church.sermonVideos || [],
     tags: church.tags || [],

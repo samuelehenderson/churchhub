@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { createChurch } from '../data/store.js';
 import { parseStreamUrl } from '../data/streams.js';
+import YouTubeChannelInput from './YouTubeChannelInput.jsx';
 
 const blank = {
   id: '',
@@ -52,6 +53,7 @@ export default function NewChurchForm({ onCreated, onCancel }) {
   const [form, setForm] = useState(blank);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [resolvedYouTube, setResolvedYouTube] = useState(null);
 
   const onChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -81,6 +83,13 @@ export default function NewChurchForm({ onCreated, onCancel }) {
     const fallback = form.livestreamUrl.trim();
     const fallbackParsed = fallback ? parseStreamUrl(fallback) : null;
 
+    // If the YouTube channel resolved successfully, persist the canonical
+    // channel ID + permanent live embed URL so the church profile can show
+    // future live streams automatically without any further admin action.
+    const liveChannelUrl = resolvedYouTube?.embedUrl
+      ? resolvedYouTube.embedUrl
+      : form.liveChannelUrl.trim() || null;
+
     const church = {
       id,
       name: form.name.trim(),
@@ -99,7 +108,11 @@ export default function NewChurchForm({ onCreated, onCancel }) {
       online: !!form.online,
       isLive: false,
       liveTitle: null,
-      liveChannelUrl: form.liveChannelUrl.trim() || null,
+      liveChannelUrl,
+      youtubeChannelId: resolvedYouTube?.channelId || null,
+      youtubeChannelTitle: resolvedYouTube?.channelTitle || null,
+      youtubeChannelThumbnail: resolvedYouTube?.channelThumbnail || null,
+      youtubeChannelOriginalUrl: resolvedYouTube?.originalUrl || form.liveChannelUrl.trim() || null,
       livestreamUrl: fallbackParsed?.embedUrl || fallback || null,
       sermonVideos: form.sermonVideos
         .split('\n')
@@ -208,15 +221,19 @@ export default function NewChurchForm({ onCreated, onCancel }) {
         />
       </div>
 
-      <div className="field">
-        <label>YouTube channel URL (auto-live)</label>
-        <input
-          name="liveChannelUrl"
-          value={form.liveChannelUrl}
-          onChange={onChange}
-          placeholder="https://www.youtube.com/channel/UC..."
-        />
-      </div>
+      <YouTubeChannelInput
+        label="YouTube channel URL (auto-live)"
+        value={form.liveChannelUrl}
+        onChange={(v) => setForm((f) => ({ ...f, liveChannelUrl: v }))}
+        resolved={resolvedYouTube}
+        onResolved={setResolvedYouTube}
+        onCleared={() => setResolvedYouTube(null)}
+      />
+      <p style={{ fontSize: '0.82rem', color: 'var(--ink-muted)', marginTop: -8, marginBottom: 14 }}>
+        Paste a /channel/UC…, /@handle, /c/, or /user/ URL. We pin the
+        channel ID so future live streams play automatically — no manual
+        updates needed per service.
+      </p>
 
       <div className="field">
         <label>Fallback video URL (latest sermon)</label>
