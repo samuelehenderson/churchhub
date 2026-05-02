@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { createChurch } from '../data/store.js';
 import { parseStreamUrl } from '../data/streams.js';
+import { isYouTubeApiConfigured } from '../data/youtube.js';
 import YouTubeChannelInput from './YouTubeChannelInput.jsx';
 
 const blank = {
@@ -230,9 +231,9 @@ export default function NewChurchForm({ onCreated, onCancel }) {
         onCleared={() => setResolvedYouTube(null)}
       />
       <p style={{ fontSize: '0.82rem', color: 'var(--ink-muted)', marginTop: -8, marginBottom: 14 }}>
-        Paste a /channel/UC…, /@handle, /c/, or /user/ URL. We pin the
-        channel ID so future live streams play automatically — no manual
-        updates needed per service.
+        {isYouTubeApiConfigured
+          ? 'Paste a /channel/UC…, /@handle, /c/, or /user/ URL. We pin the channel ID so future live streams play automatically — no manual updates needed per service.'
+          : 'Paste a /channel/UC… URL — that locks in a permanent live embed. (For /@handle, /c/, /user/ URLs, set VITE_YOUTUBE_API_KEY in Vercel.)'}
       </p>
 
       <div className="field">

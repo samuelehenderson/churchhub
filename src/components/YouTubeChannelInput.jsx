@@ -28,8 +28,15 @@ export default function YouTubeChannelInput({
   onResolved,
   onCleared,
   label = 'YouTube channel URL',
-  placeholder = 'https://www.youtube.com/@yourchurch  or  /channel/UC...  or  /c/...  or  /user/...'
+  placeholder
 }) {
+  // Only advertise URL formats we can actually resolve in the current
+  // environment. Without the API key, only /channel/UC… works.
+  const effectivePlaceholder =
+    placeholder ??
+    (isYouTubeApiConfigured
+      ? 'https://www.youtube.com/@yourchurch  or  /channel/UC...  or  /c/...  or  /user/...'
+      : 'https://www.youtube.com/channel/UC...');
   const [status, setStatus] = useState('idle'); // idle | resolving | error
   const [error, setError] = useState(null);
   const lastResolvedFor = useRef(null);
@@ -79,12 +86,6 @@ export default function YouTubeChannelInput({
     }
   }
 
-  const onPaste = (e) => {
-    // Let onChange fire first; the effect above will trigger resolution.
-    const pasted = (e.clipboardData?.getData('text') || '').trim();
-    if (pasted) onChange(pasted);
-  };
-
   const clear = () => {
     onChange('');
     onCleared?.();
@@ -101,8 +102,7 @@ export default function YouTubeChannelInput({
           name="liveChannelUrl"
           value={value || ''}
           onChange={(e) => onChange(e.target.value)}
-          onPaste={onPaste}
-          placeholder={placeholder}
+          placeholder={effectivePlaceholder}
           autoComplete="off"
           spellCheck={false}
         />
