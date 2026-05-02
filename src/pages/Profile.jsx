@@ -2,6 +2,7 @@ import React from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useChurch } from '../hooks/useChurches.js';
 import LiveEmbed from '../components/LiveEmbed.jsx';
+import { getPlatform } from '../data/socials.jsx';
 import {
   IconArrowLeft, IconPin, IconClock, IconPhone, IconMail, IconGlobe,
   IconHeart, IconHand, IconWave, IconUsers, IconPlay
@@ -135,16 +136,42 @@ export default function Profile() {
               <li><IconMail /> {church.contact.email}</li>
               <li><IconGlobe /> <a href={church.website} target="_blank" rel="noreferrer">{church.website.replace(/^https?:\/\//, '')}</a></li>
             </ul>
-            <div className="tag-row" style={{ marginTop: 10 }}>
-              {Object.keys(church.socials).map((s) => (
-                <a key={s} href={church.socials[s]} className="tag tag-cool" target="_blank" rel="noreferrer">
-                  {s.charAt(0).toUpperCase() + s.slice(1)}
-                </a>
-              ))}
-            </div>
+            <SocialLinks socials={church.socials} />
           </section>
         </aside>
       </div>
+    </div>
+  );
+}
+
+function SocialLinks({ socials }) {
+  // Hide '#' placeholder values from old seed data and any blanks.
+  const entries = Object.entries(socials || {}).filter(
+    ([, url]) => url && url !== '#'
+  );
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="social-buttons" style={{ marginTop: 12 }}>
+      {entries.map(([key, url]) => {
+        const p = getPlatform(key);
+        const Icon = p.icon;
+        return (
+          <a
+            key={key}
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            className="social-button"
+            style={{ '--social-color': p.color }}
+            aria-label={`${p.label} (opens in new tab)`}
+            title={p.label}
+          >
+            <Icon />
+            <span>{p.label}</span>
+          </a>
+        );
+      })}
     </div>
   );
 }

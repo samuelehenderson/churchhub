@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import { createChurch } from '../data/store.js';
 import { parseStreamUrl } from '../data/streams.js';
 import { isYouTubeApiConfigured } from '../data/youtube.js';
+import { normalizeSocialUrl } from '../data/socials.jsx';
 import YouTubeChannelInput from './YouTubeChannelInput.jsx';
+import SocialsEditor from './SocialsEditor.jsx';
 
 const blank = {
   id: '',
@@ -22,6 +24,7 @@ const blank = {
   sermonVideos: '',          // "Title | Date | URL" per line
   tags: '',                  // comma-separated
   ministries: '',            // comma-separated
+  socials: {},               // { platform: url }
   phone: '',
   email: '',
   website: '',
@@ -128,7 +131,11 @@ export default function NewChurchForm({ onCreated, onCancel }) {
       ministries: form.ministries.split(',').map((m) => m.trim()).filter(Boolean),
       contact: { phone: form.phone.trim(), email: form.email.trim() },
       website: form.website.trim() || null,
-      socials: {},
+      socials: Object.fromEntries(
+        Object.entries(form.socials || {})
+          .map(([k, v]) => [k, normalizeSocialUrl(k, v)])
+          .filter(([, v]) => v)
+      ),
       logoColor: form.logoColor
     };
 
@@ -280,6 +287,14 @@ export default function NewChurchForm({ onCreated, onCancel }) {
       <div className="field">
         <label>Website</label>
         <input name="website" value={form.website} onChange={onChange} placeholder="https://..." />
+      </div>
+
+      <div className="field">
+        <label>Social media (optional)</label>
+        <SocialsEditor
+          value={form.socials}
+          onChange={(next) => setForm((f) => ({ ...f, socials: next }))}
+        />
       </div>
 
       <div className="field">

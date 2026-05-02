@@ -1090,6 +1090,103 @@ p { margin: 0 0 0.75em 0; }
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
 }
 
+/* =========================================================
+   Socials editor + display
+   ========================================================= */
+
+.socials-editor .socials-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.social-row {
+  display: grid;
+  grid-template-columns: 28px 130px 1fr 32px;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.social-row-icon {
+  display: grid;
+  place-items: center;
+}
+.social-platform-select,
+.social-url-input {
+  height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  border-radius: 6px;
+  font-size: 0.88rem;
+  font-family: inherit;
+  color: var(--ink);
+  min-width: 0;
+}
+.social-platform-select { background: var(--bg-elevated); }
+.social-url-input::placeholder { color: var(--ink-muted); }
+.social-remove-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--ink-muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: all 0.15s ease;
+}
+.social-remove-btn:hover {
+  background: var(--rose);
+  color: #fff;
+  border-color: var(--rose);
+}
+
+@media (max-width: 540px) {
+  .social-row {
+    grid-template-columns: 28px 1fr 32px;
+    grid-template-rows: auto auto;
+    row-gap: 6px;
+  }
+  .social-platform-select { grid-column: 2 / 3; }
+  .social-url-input { grid-column: 1 / -1; grid-row: 2; }
+}
+
+/* Profile-page social buttons (visitor-facing) */
+.social-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.social-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg-elevated);
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+.social-button:hover {
+  border-color: var(--social-color, var(--gold));
+  color: var(--social-color, var(--navy));
+  transform: translateY(-1px);
+}
+.social-button svg {
+  color: var(--social-color, var(--ink));
+  flex-shrink: 0;
+}
+
 @media (max-width: 480px) {
   .yt-channel-input .yt-input-row {
     flex-direction: column;
