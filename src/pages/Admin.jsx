@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useChurches } from '../hooks/useChurches.js';
 import { updateChurch, resetChurch, resetAll } from '../data/store.js';
 import { parseStreamUrl, describeStrategy } from '../data/streams.js';
+import { isYouTubeApiConfigured } from '../data/youtube.js';
 import NewChurchForm from '../components/NewChurchForm.jsx';
 import YouTubeChannelInput from '../components/YouTubeChannelInput.jsx';
 import { IconChurch, IconPlay, IconMail } from '../components/Icons.jsx';
@@ -353,7 +354,9 @@ export default function Admin() {
                 onCleared={() => setResolvedYouTube(null)}
               />
               <p style={{ fontSize: '0.82rem', color: 'var(--ink-muted)', marginTop: -8, marginBottom: 14 }}>
-                Paste any YouTube channel link (/@handle, /channel/UC…, /c/, /user/) or a vimeo.com/event URL.
+                {isYouTubeApiConfigured
+                  ? 'Paste any YouTube channel link (/@handle, /channel/UC…, /c/, /user/) or a vimeo.com/event URL.'
+                  : 'Paste a YouTube /channel/UC… URL or a vimeo.com/event URL. (For /@handle, /c/, /user/ URLs, set VITE_YOUTUBE_API_KEY in Vercel.)'}
               </p>
               {/* Vimeo / other auto-live URLs still flow through the parser hint. */}
               {form.liveChannelUrl && !/youtube\.com|youtu\.be/i.test(form.liveChannelUrl) && (
