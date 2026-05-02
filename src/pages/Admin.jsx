@@ -1,13 +1,17 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useChurches } from '../hooks/useChurches.js';
-import { updateChurch, resetChurch, resetAll } from '../data/store.js';
+import { useAuth, useEditableChurchIds, useIsChurchAdmin } from '../hooks/useAuth.js';
+import { updateChurch } from '../data/store.js';
 import { parseStreamUrl, describeStrategy } from '../data/streams.js';
 import { isYouTubeApiConfigured } from '../data/youtube.js';
 import NewChurchForm from '../components/NewChurchForm.jsx';
 import YouTubeChannelInput from '../components/YouTubeChannelInput.jsx';
+import ChurchMembersPanel from '../components/ChurchMembersPanel.jsx';
+import DeleteChurchDialog from '../components/DeleteChurchDialog.jsx';
 import { IconChurch, IconPlay, IconMail } from '../components/Icons.jsx';
 
-const sections = [
+const baseSections = [
   { key: 'profile', label: 'Profile' },
   { key: 'times', label: 'Service times' },
   { key: 'stream', label: 'Livestream' },
@@ -18,8 +22,6 @@ const sections = [
 
 // Build a flat form object from a church record.
 function churchToForm(c) {
-  // Show the friendliest version of the channel reference: prefer the
-  // original URL the admin typed, fall back to the embed URL we stored.
   const channelInput = c.youtubeChannelOriginalUrl || c.liveChannelUrl || '';
   return {
     name: c.name,
@@ -38,8 +40,6 @@ function churchToForm(c) {
   };
 }
 
-// Pre-populate the resolved-channel preview from a saved church, so reopening
-// admin shows the resolved metadata even before the user re-resolves.
 function existingResolved(c) {
   if (!c.youtubeChannelId) return null;
   return {
@@ -53,16 +53,10 @@ function existingResolved(c) {
   };
 }
 
-// Convert form fields back into the structured church patch.
 function formToPatch(form, resolvedYouTube) {
-  // Normalize the fallback livestream URL through the same parser so a pasted
-  // watch URL becomes an embed URL automatically.
   const fallback = form.livestream.trim();
   const fallbackParsed = fallback ? parseStreamUrl(fallback) : null;
 
-  // Prefer the resolved permanent embed URL when available — that's the whole
-  // point of resolution: the admin pastes once, we lock in the channel ID,
-  // and live streams play forever without further updates.
   const liveChannelUrl = resolvedYouTube?.embedUrl
     ? resolvedYouTube.embedUrl
     : form.liveChannelUrl.trim();
@@ -95,127 +89,137 @@ function formToPatch(form, resolvedYouTube) {
   };
 }
 
-// Passcode for unlocking "create new church" — set via VITE_ADMIN_PASSCODE.
-// If no passcode is set, the create flow is hidden entirely.
-const ADMIN_PASSCODE = import.meta.env.VITE_ADMIN_PASSCODE;
-const UNLOCK_KEY = 'churchhub:admin-unlocked:v1';
-
 export default function Admin() {
-  const churches = useChurches();
-  const [selectedId, setSelectedId] = useState(churches[0]?.id);
+  const { status, isSuperAdmin } = useAuth();
+  const allChurches = useChurches();
+  const { all: canSeeAll, ids: editableIds } = useEditableChurchIds();
+
+  // Filter to churches the current user can edit. Super admin sees everything.
+  const editableChurches = useMemo(() => {
+    if (canSeeAll) return allChurches;
+    return allChurches.filter((c) => editableIds?.has(c.id));
+  }, [allChurches, canSeeAll, editableIds]);
+
+  const [selectedId, setSelectedId] = useState(editableChurches[0]?.id);
   const [section, setSection] = useState('profile');
   const [saved, setSaved] = useState(false);
-
-  // Create-new-church flow.
-  const [unlocked, setUnlocked] = useState(() => {
-    try {
-      return sessionStorage.getItem(UNLOCK_KEY) === '1';
-    } catch {
-      return false;
-    }
-  });
-  const [passInput, setPassInput] = useState('');
-  const [passError, setPassError] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
-  const church = churches.find((c) => c.id === selectedId) || churches[0];
-  const [form, setForm] = useState(() => churchToForm(church));
-  const [resolvedYouTube, setResolvedYouTube] = useState(() => existingResolved(church));
+  // When the editable list changes (sign-in, invites claimed, deletes), keep
+  // the selection valid.
+  useEffect(() => {
+    if (!editableChurches.length) {
+      setSelectedId(undefined);
+      return;
+    }
+    if (!editableChurches.find((c) => c.id === selectedId)) {
+      setSelectedId(editableChurches[0].id);
+    }
+  }, [editableChurches]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // When the user picks a different church, reload the form.
+  const church = editableChurches.find((c) => c.id === selectedId) || editableChurches[0];
+  const isChurchAdmin = useIsChurchAdmin(church?.id);
+
+  const sections = useMemo(() => {
+    if (!church) return baseSections;
+    return isChurchAdmin
+      ? [...baseSections, { key: 'members', label: 'Members' }]
+      : baseSections;
+  }, [church, isChurchAdmin]);
+
+  const [form, setForm] = useState(() => (church ? churchToForm(church) : null));
+  const [resolvedYouTube, setResolvedYouTube] = useState(() =>
+    church ? existingResolved(church) : null
+  );
+
   useEffect(() => {
     if (church) {
       setForm(churchToForm(church));
       setResolvedYouTube(existingResolved(church));
+    } else {
+      setForm(null);
+      setResolvedYouTube(null);
     }
     setSaved(false);
+    setSaveError(null);
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
-  const onSave = (e) => {
+  const onSave = async (e) => {
     e.preventDefault();
-    updateChurch(selectedId, formToPatch(form, resolvedYouTube));
+    if (!church) return;
+    setSubmitting(true);
+    setSaveError(null);
+    const { error } = await updateChurch(church.id, formToPatch(form, resolvedYouTube));
+    setSubmitting(false);
+    if (error) {
+      setSaveError(error.message || 'Save failed.');
+      return;
+    }
     setSaved(true);
     setTimeout(() => setSaved(false), 2400);
   };
 
-  const onReset = () => {
-    if (confirm('Discard your edits to this church and restore the original?')) {
-      resetChurch(selectedId);
-    }
-  };
+  // ----- gating -----
 
-  const onResetAll = () => {
-    if (confirm('Discard ALL local edits across every church?')) {
-      resetAll();
-    }
-  };
+  if (status === 'loading') {
+    return (
+      <div className="page fade-in">
+        <p style={{ color: 'var(--ink-muted)', textAlign: 'center', marginTop: 40 }}>
+          Loading…
+        </p>
+      </div>
+    );
+  }
 
-  const tryUnlock = (e) => {
-    e.preventDefault();
-    if (!ADMIN_PASSCODE) {
-      setPassError(true);
-      return;
-    }
-    if (passInput === ADMIN_PASSCODE) {
-      setUnlocked(true);
-      setPassError(false);
-      try {
-        sessionStorage.setItem(UNLOCK_KEY, '1');
-      } catch {}
-    } else {
-      setPassError(true);
-    }
-  };
+  if (status === 'signed-out') {
+    return (
+      <div className="page fade-in" style={{ maxWidth: 460, margin: '0 auto' }}>
+        <div className="card admin-form">
+          <h2 style={{ marginBottom: 6 }}>Admin sign-in required</h2>
+          <p style={{ color: 'var(--ink-soft)', marginBottom: 16 }}>
+            Church admins manage their profile, livestream, sermons, and team
+            from here. Sign in to continue.
+          </p>
+          <Link to="/auth/login" className="btn btn-primary">
+            Sign in
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
-  const lock = () => {
-    setUnlocked(false);
-    setCreating(false);
-    setPassInput('');
-    try {
-      sessionStorage.removeItem(UNLOCK_KEY);
-    } catch {}
-  };
-
-  if (!church) return null;
+  // Signed in but no churches editable AND not super admin.
+  if (editableChurches.length === 0 && !isSuperAdmin) {
+    return (
+      <div className="page fade-in" style={{ maxWidth: 540, margin: '0 auto' }}>
+        <div className="card admin-form">
+          <h2 style={{ marginBottom: 6 }}>You're signed in</h2>
+          <p style={{ color: 'var(--ink-soft)' }}>
+            You don't have edit access to any churches yet. Ask the church
+            owner to add you, then refresh this page.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="page fade-in">
       <div className="section-head" style={{ marginTop: 8 }}>
         <h2>Church admin</h2>
-        {unlocked && (
-          <button className="btn-link" onClick={lock}>Lock</button>
+        {isSuperAdmin && !creating && (
+          <button className="btn btn-gold btn-sm" onClick={() => setCreating(true)}>
+            + Add new church
+          </button>
         )}
       </div>
 
-      {/* Unlock card — only shows if a passcode is configured */}
-      {ADMIN_PASSCODE && !unlocked && (
-        <form
-          className="card"
-          onSubmit={tryUnlock}
-          style={{ marginBottom: 18, display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}
-        >
-          <div className="field" style={{ flex: 1, minWidth: 220, marginBottom: 0 }}>
-            <label>Owner passcode</label>
-            <input
-              type="password"
-              value={passInput}
-              onChange={(e) => { setPassInput(e.target.value); setPassError(false); }}
-              placeholder="Enter passcode to add a new church"
-            />
-            {passError && (
-              <p style={{ fontSize: '0.82rem', color: 'var(--rose)', marginTop: 6 }}>
-                Incorrect passcode.
-              </p>
-            )}
-          </div>
-          <button type="submit" className="btn btn-primary">Unlock</button>
-        </form>
-      )}
-
-      {/* Create-new-church flow (only visible when unlocked) */}
-      {unlocked && creating && (
+      {isSuperAdmin && creating && (
         <div style={{ marginBottom: 24 }}>
           <NewChurchForm
             onCreated={(c) => {
@@ -227,250 +231,282 @@ export default function Admin() {
         </div>
       )}
 
-      {unlocked && !creating && (
-        <div
-          className="card"
-          style={{
-            marginBottom: 18,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            background: 'var(--cream)',
-            borderColor: 'rgba(200, 155, 60, 0.35)'
-          }}
-        >
-          <div>
-            <strong style={{ color: 'var(--gold-deep)' }}>Owner mode unlocked.</strong>
-            <span style={{ color: 'var(--ink-soft)', marginLeft: 8 }}>
-              You can add churches directly to the database.
-            </span>
+      {church && (
+        <>
+          <div className="filter-bar" style={{ marginBottom: 18 }}>
+            <div className="field" style={{ flex: 1 }}>
+              <label>Editing church</label>
+              <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>
+                {editableChurches.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} — {c.city}, {c.state}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {isSuperAdmin && (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setDeleting(true)}
+                style={{ color: 'var(--rose)', alignSelf: 'flex-end' }}
+              >
+                Delete this church
+              </button>
+            )}
           </div>
-          <button className="btn btn-gold btn-sm" onClick={() => setCreating(true)}>
-            + Add new church
-          </button>
-        </div>
+
+          <div className="admin-grid">
+            <aside className="admin-side">
+              {sections.map((s) => (
+                <button
+                  key={s.key}
+                  className={s.key === section ? 'active' : ''}
+                  onClick={() => setSection(s.key)}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </aside>
+
+            {section === 'members' ? (
+              <div className="card admin-form">
+                <ChurchMembersPanel churchId={church.id} churchName={church.name} />
+              </div>
+            ) : (
+              <form className="card admin-form" onSubmit={onSave}>
+                {saved && (
+                  <div
+                    className="banner"
+                    style={{
+                      background: '#e9f3ec',
+                      borderColor: '#bcd9c2',
+                      color: '#3d5a3d',
+                      marginBottom: 0
+                    }}
+                  >
+                    Saved. Visit <strong>Home</strong>, <strong>Churches</strong>,
+                    or this church's profile to see the change.
+                  </div>
+                )}
+                {saveError && (
+                  <div
+                    className="banner"
+                    style={{
+                      background: '#fbecdb',
+                      borderColor: '#e6c89a',
+                      color: '#8a6a1f',
+                      marginBottom: 0
+                    }}
+                  >
+                    {saveError}
+                  </div>
+                )}
+
+                {section === 'profile' && (
+                  <>
+                    <h3 style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 400 }}>
+                      Profile
+                    </h3>
+                    <div className="field">
+                      <label>Church name</label>
+                      <input name="name" value={form.name} onChange={onChange} />
+                    </div>
+                    <div className="field">
+                      <label>Address</label>
+                      <input name="address" value={form.address} onChange={onChange} />
+                    </div>
+                    <div className="field">
+                      <label>About</label>
+                      <textarea name="description" value={form.description} onChange={onChange} />
+                    </div>
+                  </>
+                )}
+
+                {section === 'times' && (
+                  <>
+                    <h3 style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 400 }}>
+                      Service times
+                    </h3>
+                    <div className="field">
+                      <label>One per line (e.g. "Sun 9:00 AM")</label>
+                      <textarea name="times" value={form.times} onChange={onChange} />
+                    </div>
+                  </>
+                )}
+
+                {section === 'stream' && (
+                  <>
+                    <h3 style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 400 }}>
+                      Livestream
+                    </h3>
+
+                    <YouTubeChannelInput
+                      label={
+                        <>
+                          Auto-live channel URL{' '}
+                          <span style={{ color: 'var(--gold-deep)', textTransform: 'none', letterSpacing: 0 }}>
+                            (recommended)
+                          </span>
+                        </>
+                      }
+                      value={form.liveChannelUrl}
+                      onChange={(v) => setForm((f) => ({ ...f, liveChannelUrl: v }))}
+                      resolved={resolvedYouTube}
+                      onResolved={setResolvedYouTube}
+                      onCleared={() => setResolvedYouTube(null)}
+                    />
+                    <p style={{ fontSize: '0.82rem', color: 'var(--ink-muted)', marginTop: -8, marginBottom: 14 }}>
+                      {isYouTubeApiConfigured
+                        ? 'Paste any YouTube channel link (/@handle, /channel/UC…, /c/, /user/) or a vimeo.com/event URL.'
+                        : 'Paste a YouTube /channel/UC… URL or a vimeo.com/event URL. (For /@handle, /c/, /user/ URLs, set VITE_YOUTUBE_API_KEY in Vercel.)'}
+                    </p>
+                    {form.liveChannelUrl && !/youtube\.com|youtu\.be/i.test(form.liveChannelUrl) && (
+                      <StreamHint url={form.liveChannelUrl} expected="auto" />
+                    )}
+
+                    <div className="field">
+                      <label>
+                        Fallback video{' '}
+                        <span style={{ color: 'var(--ink-muted)', textTransform: 'none', letterSpacing: 0 }}>
+                          (shown when not live)
+                        </span>
+                      </label>
+                      <input
+                        name="livestream"
+                        value={form.livestream}
+                        onChange={onChange}
+                        placeholder="https://www.youtube.com/watch?v=... (latest sermon, welcome video)"
+                      />
+                      <StreamHint url={form.livestream} expected="video" />
+                    </div>
+
+                    <div className="field">
+                      <label
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          textTransform: 'none',
+                          letterSpacing: 0,
+                          fontWeight: 500
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          name="isLive"
+                          checked={form.isLive}
+                          onChange={(e) => setForm({ ...form, isLive: e.target.checked })}
+                          style={{ width: 18, height: 18 }}
+                        />
+                        Mark this church as live right now
+                      </label>
+                      <p style={{ fontSize: '0.82rem', color: 'var(--ink-muted)', marginTop: 4 }}>
+                        Manually toggles the "Live" badge and feature placement.
+                        With the YouTube API key set, the embed also auto-detects
+                        live status and shows a "Live Now" badge on the player.
+                      </p>
+                    </div>
+
+                    {form.isLive && (
+                      <div className="field">
+                        <label>Current sermon / stream title</label>
+                        <input
+                          name="liveTitle"
+                          value={form.liveTitle}
+                          onChange={onChange}
+                          placeholder="Sunday Morning — Anchored in Hope"
+                        />
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {section === 'sermons' && (
+                  <>
+                    <h3 style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 400 }}>
+                      Sermon videos
+                    </h3>
+                    <div className="field">
+                      <label>
+                        One per line: <code>Title | Date | URL</code>
+                      </label>
+                      <textarea
+                        name="sermons"
+                        value={form.sermons}
+                        onChange={onChange}
+                        style={{ minHeight: 160 }}
+                      />
+                    </div>
+                  </>
+                )}
+
+                {section === 'ministries' && (
+                  <>
+                    <h3 style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 400 }}>
+                      Ministries
+                    </h3>
+                    <div className="field">
+                      <label>Comma-separated tags</label>
+                      <input name="ministries" value={form.ministries} onChange={onChange} />
+                    </div>
+                  </>
+                )}
+
+                {section === 'contact' && (
+                  <>
+                    <h3 style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 400 }}>
+                      Contact info
+                    </h3>
+                    <div className="field">
+                      <label>Phone</label>
+                      <input name="phone" value={form.phone} onChange={onChange} />
+                    </div>
+                    <div className="field">
+                      <label>Email</label>
+                      <input name="email" type="email" value={form.email} onChange={onChange} />
+                    </div>
+                    <div className="field">
+                      <label>Website</label>
+                      <input name="website" value={form.website} onChange={onChange} />
+                    </div>
+                  </>
+                )}
+
+                <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+                  <button type="submit" className="btn btn-primary" disabled={submitting}>
+                    {submitting ? 'Saving…' : 'Save changes'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setForm(churchToForm(church))}
+                    disabled={submitting}
+                  >
+                    Discard unsaved
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </>
       )}
 
-      <div className="banner">
-        <strong>Editing existing churches:</strong> Changes save to this browser
-        (<code>localStorage</code>) only — they don't update what other visitors see.
-        For shared edits, use the Supabase dashboard. Auth + real saves coming soon.
-      </div>
-
-      <div className="filter-bar" style={{ marginBottom: 18 }}>
-        <div className="field">
-          <label>Editing church</label>
-          <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>
-            {churches.map((c) => (
-              <option key={c.id} value={c.id}>{c.name} — {c.city}, {c.state}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      <div className="admin-grid">
-        <aside className="admin-side">
-          {sections.map((s) => (
-            <button
-              key={s.key}
-              className={s.key === section ? 'active' : ''}
-              onClick={() => setSection(s.key)}
-            >
-              {s.label}
-            </button>
-          ))}
-          <div className="divider" style={{ margin: '12px 0' }} />
-          <button onClick={onReset} style={{ color: 'var(--rose)' }}>
-            Reset this church
-          </button>
-          <button onClick={onResetAll} style={{ color: 'var(--ink-muted)', fontSize: '0.82rem' }}>
-            Reset all local edits
-          </button>
-        </aside>
-
-        <form className="card admin-form" onSubmit={onSave}>
-          {saved && (
-            <div
-              className="banner"
-              style={{
-                background: '#e9f3ec',
-                borderColor: '#bcd9c2',
-                color: '#3d5a3d',
-                marginBottom: 0
-              }}
-            >
-              Saved to your browser. Visit <strong>Home</strong>, <strong>Churches</strong>,
-              or this church's profile to see the change.
-            </div>
-          )}
-
-          {section === 'profile' && (
-            <>
-              <h3 style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 400 }}>Profile</h3>
-              <div className="field">
-                <label>Church name</label>
-                <input name="name" value={form.name} onChange={onChange} />
-              </div>
-              <div className="field">
-                <label>Address</label>
-                <input name="address" value={form.address} onChange={onChange} />
-              </div>
-              <div className="field">
-                <label>About</label>
-                <textarea name="description" value={form.description} onChange={onChange} />
-              </div>
-            </>
-          )}
-
-          {section === 'times' && (
-            <>
-              <h3 style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 400 }}>Service times</h3>
-              <div className="field">
-                <label>One per line (e.g. "Sun 9:00 AM")</label>
-                <textarea name="times" value={form.times} onChange={onChange} />
-              </div>
-            </>
-          )}
-
-          {section === 'stream' && (
-            <>
-              <h3 style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 400 }}>
-                Livestream
-              </h3>
-
-              <YouTubeChannelInput
-                label={
-                  <>
-                    Auto-live channel URL{' '}
-                    <span style={{ color: 'var(--gold-deep)', textTransform: 'none', letterSpacing: 0 }}>
-                      (recommended)
-                    </span>
-                  </>
-                }
-                value={form.liveChannelUrl}
-                onChange={(v) => setForm((f) => ({ ...f, liveChannelUrl: v }))}
-                resolved={resolvedYouTube}
-                onResolved={setResolvedYouTube}
-                onCleared={() => setResolvedYouTube(null)}
-              />
-              <p style={{ fontSize: '0.82rem', color: 'var(--ink-muted)', marginTop: -8, marginBottom: 14 }}>
-                {isYouTubeApiConfigured
-                  ? 'Paste any YouTube channel link (/@handle, /channel/UC…, /c/, /user/) or a vimeo.com/event URL.'
-                  : 'Paste a YouTube /channel/UC… URL or a vimeo.com/event URL. (For /@handle, /c/, /user/ URLs, set VITE_YOUTUBE_API_KEY in Vercel.)'}
-              </p>
-              {/* Vimeo / other auto-live URLs still flow through the parser hint. */}
-              {form.liveChannelUrl && !/youtube\.com|youtu\.be/i.test(form.liveChannelUrl) && (
-                <StreamHint url={form.liveChannelUrl} expected="auto" />
-              )}
-
-              <div className="field">
-                <label>Fallback video <span style={{ color: 'var(--ink-muted)', textTransform: 'none', letterSpacing: 0 }}>(shown when not live)</span></label>
-                <input
-                  name="livestream"
-                  value={form.livestream}
-                  onChange={onChange}
-                  placeholder="https://www.youtube.com/watch?v=... (latest sermon, welcome video)"
-                />
-                <StreamHint url={form.livestream} expected="video" />
-              </div>
-
-              <div className="field">
-                <label style={{ display: 'flex', alignItems: 'center', gap: 10, textTransform: 'none', letterSpacing: 0, fontWeight: 500 }}>
-                  <input
-                    type="checkbox"
-                    name="isLive"
-                    checked={form.isLive}
-                    onChange={(e) => setForm({ ...form, isLive: e.target.checked })}
-                    style={{ width: 18, height: 18 }}
-                  />
-                  Mark this church as live right now
-                </label>
-                <p style={{ fontSize: '0.82rem', color: 'var(--ink-muted)', marginTop: 4 }}>
-                  Manually toggles the "Live" badge and feature placement. With a backend you'd auto-detect this from the YouTube Data API every few minutes.
-                </p>
-              </div>
-
-              {form.isLive && (
-                <div className="field">
-                  <label>Current sermon / stream title</label>
-                  <input
-                    name="liveTitle"
-                    value={form.liveTitle}
-                    onChange={onChange}
-                    placeholder="Sunday Morning — Anchored in Hope"
-                  />
-                </div>
-              )}
-
-              <div className="banner" style={{ marginBottom: 0 }}>
-                <strong>How "live" works:</strong> If you set an <em>Auto-live channel URL</em>,
-                the embed always points at whatever your channel is currently broadcasting —
-                you don't need to update it for each service. The Fallback Video plays for
-                visitors who land on your profile when you're offline.
-              </div>
-            </>
-          )}
-
-          {section === 'sermons' && (
-            <>
-              <h3 style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 400 }}>Sermon videos</h3>
-              <div className="field">
-                <label>One per line: <code>Title | Date | URL</code></label>
-                <textarea
-                  name="sermons"
-                  value={form.sermons}
-                  onChange={onChange}
-                  style={{ minHeight: 160 }}
-                />
-              </div>
-            </>
-          )}
-
-          {section === 'ministries' && (
-            <>
-              <h3 style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 400 }}>Ministries</h3>
-              <div className="field">
-                <label>Comma-separated tags</label>
-                <input name="ministries" value={form.ministries} onChange={onChange} />
-              </div>
-            </>
-          )}
-
-          {section === 'contact' && (
-            <>
-              <h3 style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontWeight: 400 }}>Contact info</h3>
-              <div className="field">
-                <label>Phone</label>
-                <input name="phone" value={form.phone} onChange={onChange} />
-              </div>
-              <div className="field">
-                <label>Email</label>
-                <input name="email" type="email" value={form.email} onChange={onChange} />
-              </div>
-              <div className="field">
-                <label>Website</label>
-                <input name="website" value={form.website} onChange={onChange} />
-              </div>
-            </>
-          )}
-
-          <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
-            <button type="submit" className="btn btn-primary">Save changes</button>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => setForm(churchToForm(church))}
-            >
-              Discard unsaved
-            </button>
-          </div>
-        </form>
-      </div>
+      {deleting && church && (
+        <DeleteChurchDialog
+          church={church}
+          onClose={() => setDeleting(false)}
+          onDeleted={() => {
+            setDeleting(false);
+            setSelectedId(undefined);
+          }}
+        />
+      )}
 
       <div className="divider" />
 
       <div className="section-head" style={{ marginTop: 0 }}>
-        <h2 style={{ fontStyle: 'italic', fontWeight: 400 }}>Claim your church</h2>
+        <h2 style={{ fontStyle: 'italic', fontWeight: 400 }}>Help</h2>
       </div>
       <div className="church-grid">
         <div className="card" style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
@@ -478,9 +514,9 @@ export default function Admin() {
           <div>
             <h4 style={{ marginBottom: 4 }}>Not listed yet?</h4>
             <p style={{ fontSize: '0.9rem', color: 'var(--ink-soft)', marginBottom: 8 }}>
-              Submit your church and we'll review it within a few days. Verified churches can manage their profile, livestream, and sermons.
+              Reach out to the ChurchHub owner — they can add your church and
+              invite you as an admin.
             </p>
-            <button className="btn btn-ghost btn-sm">Submit a church</button>
           </div>
         </div>
         <div className="card" style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
@@ -488,9 +524,9 @@ export default function Admin() {
           <div>
             <h4 style={{ marginBottom: 4 }}>Already listed?</h4>
             <p style={{ fontSize: '0.9rem', color: 'var(--ink-soft)', marginBottom: 8 }}>
-              Claim ownership using your church email. We'll verify before granting edit access.
+              Your church owner can invite you with the email you'd like to
+              sign in with — you'll get a one-tap email to set your password.
             </p>
-            <button className="btn btn-gold btn-sm">Claim profile</button>
           </div>
         </div>
         <div className="card" style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
@@ -498,7 +534,11 @@ export default function Admin() {
           <div>
             <h4 style={{ marginBottom: 4 }}>Need help?</h4>
             <p style={{ fontSize: '0.9rem', color: 'var(--ink-soft)', marginBottom: 8 }}>
-              Email <a href="mailto:churches@churchhub.example">churches@churchhub.example</a> and our team will walk you through setup.
+              Email{' '}
+              <a href="mailto:churches@churchhub.example">
+                churches@churchhub.example
+              </a>{' '}
+              and our team will walk you through setup.
             </p>
           </div>
         </div>
@@ -508,9 +548,7 @@ export default function Admin() {
 }
 
 // Inline hint that parses the URL the user is typing and tells them what
-// strategy ChurchHub will use for it. `expected` is just for nudging:
-//  - 'auto'  -> we'd love a channel/event URL here
-//  - 'video' -> we'd love a specific video URL here
+// strategy ChurchHub will use for it.
 function StreamHint({ url, expected }) {
   if (!url || !url.trim()) return null;
   const parsed = parseStreamUrl(url);
@@ -518,7 +556,8 @@ function StreamHint({ url, expected }) {
   const tone =
     parsed.strategy === 'unknown'
       ? 'warn'
-      : (expected === 'auto' && !parsed.autoLive) || (expected === 'video' && parsed.autoLive)
+      : (expected === 'auto' && !parsed.autoLive) ||
+        (expected === 'video' && parsed.autoLive)
       ? 'info'
       : 'good';
 

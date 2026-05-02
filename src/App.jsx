@@ -9,6 +9,10 @@ import Profile from './pages/Profile.jsx';
 import Quiz from './pages/Quiz.jsx';
 import MapPage from './pages/Map.jsx';
 import Admin from './pages/Admin.jsx';
+import Login from './pages/Login.jsx';
+import ForgotPassword from './pages/ForgotPassword.jsx';
+import ResetPassword from './pages/ResetPassword.jsx';
+import AuthCallback from './pages/AuthCallback.jsx';
 
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -32,6 +36,10 @@ export default function App() {
           <Route path="/map" element={<MapPage />} />
           <Route path="/quiz" element={<Quiz />} />
           <Route path="/admin" element={<Admin />} />
+          <Route path="/auth/login" element={<Login />} />
+          <Route path="/auth/forgot" element={<ForgotPassword />} />
+          <Route path="/auth/reset" element={<ResetPassword />} />
+          <Route path="/auth/callback" element={<AuthCallback />} />
           <Route path="*" element={<Home />} />
         </Routes>
       </main>
