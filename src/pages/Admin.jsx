@@ -3,6 +3,7 @@ import { useChurches } from '../hooks/useChurches.js';
 import { updateChurch, resetChurch, resetAll } from '../data/store.js';
 import { parseStreamUrl, describeStrategy } from '../data/streams.js';
 import NewChurchForm from '../components/NewChurchForm.jsx';
+import YouTubeChannelInput from '../components/YouTubeChannelInput.jsx';
 import { IconChurch, IconPlay, IconMail } from '../components/Icons.jsx';
 
 const sections = [
@@ -16,12 +17,15 @@ const sections = [
 
 // Build a flat form object from a church record.
 function churchToForm(c) {
+  // Show the friendliest version of the channel reference: prefer the
+  // original URL the admin typed, fall back to the embed URL we stored.
+  const channelInput = c.youtubeChannelOriginalUrl || c.liveChannelUrl || '';
   return {
     name: c.name,
     description: c.description,
     address: c.address,
     times: c.serviceTimes.join('\n'),
-    liveChannelUrl: c.liveChannelUrl || '',
+    liveChannelUrl: channelInput,
     livestream: c.livestreamUrl,
     isLive: !!c.isLive,
     liveTitle: c.liveTitle || '',
@@ -33,19 +37,45 @@ function churchToForm(c) {
   };
 }
 
+// Pre-populate the resolved-channel preview from a saved church, so reopening
+// admin shows the resolved metadata even before the user re-resolves.
+function existingResolved(c) {
+  if (!c.youtubeChannelId) return null;
+  return {
+    ok: true,
+    channelId: c.youtubeChannelId,
+    channelTitle: c.youtubeChannelTitle || null,
+    channelThumbnail: c.youtubeChannelThumbnail || null,
+    embedUrl: c.liveChannelUrl,
+    originalUrl: c.youtubeChannelOriginalUrl || c.liveChannelUrl,
+    resolvedFrom: 'channelId'
+  };
+}
+
 // Convert form fields back into the structured church patch.
-function formToPatch(form) {
+function formToPatch(form, resolvedYouTube) {
   // Normalize the fallback livestream URL through the same parser so a pasted
   // watch URL becomes an embed URL automatically.
   const fallback = form.livestream.trim();
   const fallbackParsed = fallback ? parseStreamUrl(fallback) : null;
+
+  // Prefer the resolved permanent embed URL when available — that's the whole
+  // point of resolution: the admin pastes once, we lock in the channel ID,
+  // and live streams play forever without further updates.
+  const liveChannelUrl = resolvedYouTube?.embedUrl
+    ? resolvedYouTube.embedUrl
+    : form.liveChannelUrl.trim();
 
   return {
     name: form.name.trim(),
     description: form.description.trim(),
     address: form.address.trim(),
     serviceTimes: form.times.split('\n').map((s) => s.trim()).filter(Boolean),
-    liveChannelUrl: form.liveChannelUrl.trim(),
+    liveChannelUrl,
+    youtubeChannelId: resolvedYouTube?.channelId || null,
+    youtubeChannelTitle: resolvedYouTube?.channelTitle || null,
+    youtubeChannelThumbnail: resolvedYouTube?.channelThumbnail || null,
+    youtubeChannelOriginalUrl: resolvedYouTube?.originalUrl || form.liveChannelUrl.trim() || null,
     livestreamUrl: fallbackParsed?.embedUrl || fallback,
     isLive: !!form.isLive,
     liveTitle: form.liveTitle.trim(),
@@ -89,10 +119,14 @@ export default function Admin() {
 
   const church = churches.find((c) => c.id === selectedId) || churches[0];
   const [form, setForm] = useState(() => churchToForm(church));
+  const [resolvedYouTube, setResolvedYouTube] = useState(() => existingResolved(church));
 
   // When the user picks a different church, reload the form.
   useEffect(() => {
-    if (church) setForm(churchToForm(church));
+    if (church) {
+      setForm(churchToForm(church));
+      setResolvedYouTube(existingResolved(church));
+    }
     setSaved(false);
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -100,7 +134,7 @@ export default function Admin() {
 
   const onSave = (e) => {
     e.preventDefault();
-    updateChurch(selectedId, formToPatch(form));
+    updateChurch(selectedId, formToPatch(form, resolvedYouTube));
     setSaved(true);
     setTimeout(() => setSaved(false), 2400);
   };
@@ -303,16 +337,28 @@ export default function Admin() {
                 Livestream
               </h3>
 
-              <div className="field">
-                <label>Auto-live channel URL <span style={{ color: 'var(--gold-deep)', textTransform: 'none', letterSpacing: 0 }}>(recommended)</span></label>
-                <input
-                  name="liveChannelUrl"
-                  value={form.liveChannelUrl}
-                  onChange={onChange}
-                  placeholder="https://www.youtube.com/channel/UC... or vimeo.com/event/..."
-                />
+              <YouTubeChannelInput
+                label={
+                  <>
+                    Auto-live channel URL{' '}
+                    <span style={{ color: 'var(--gold-deep)', textTransform: 'none', letterSpacing: 0 }}>
+                      (recommended)
+                    </span>
+                  </>
+                }
+                value={form.liveChannelUrl}
+                onChange={(v) => setForm((f) => ({ ...f, liveChannelUrl: v }))}
+                resolved={resolvedYouTube}
+                onResolved={setResolvedYouTube}
+                onCleared={() => setResolvedYouTube(null)}
+              />
+              <p style={{ fontSize: '0.82rem', color: 'var(--ink-muted)', marginTop: -8, marginBottom: 14 }}>
+                Paste any YouTube channel link (/@handle, /channel/UC…, /c/, /user/) or a vimeo.com/event URL.
+              </p>
+              {/* Vimeo / other auto-live URLs still flow through the parser hint. */}
+              {form.liveChannelUrl && !/youtube\.com|youtu\.be/i.test(form.liveChannelUrl) && (
                 <StreamHint url={form.liveChannelUrl} expected="auto" />
-              </div>
+              )}
 
               <div className="field">
                 <label>Fallback video <span style={{ color: 'var(--ink-muted)', textTransform: 'none', letterSpacing: 0 }}>(shown when not live)</span></label>

@@ -4,44 +4,20 @@
 // stream behaves (auto-live vs. fixed video).
 
 // Strategies:
-//   'youtube-channel-live'  -> always shows the channel's CURRENT live stream
-//                              (or fallback content) — no admin updates needed
-//   'youtube-video'         -> a specific YouTube video (sermon, archived stream)
-//   'vimeo-event'           -> a Vimeo event (auto-shows live or upcoming)
-//   'vimeo-video'           -> a specific Vimeo video
-//   'facebook-page-live'    -> Facebook Page's current live stream
-//   'iframe'                -> any embed URL the church already has (Boxcast, etc.)
-//   'unknown'               -> couldn't parse; show the raw URL with a warning
+//   'youtube-channel-live'   -> always shows the channel's CURRENT live stream
+//                               (or fallback content) — no admin updates needed
+//   'youtube-channel-handle' -> @handle / /c/ / /user/ — needs API resolution to
+//                               turn into a permanent channel-live embed
+//   'youtube-video'          -> a specific YouTube video (sermon, archived stream)
+//   'vimeo-event'            -> a Vimeo event (auto-shows live or upcoming)
+//   'vimeo-video'            -> a specific Vimeo video
+//   'facebook-page-live'     -> Facebook Page's current live stream
+//   'iframe'                 -> any embed URL the church already has (Boxcast, etc.)
+//   'unknown'                -> couldn't parse; show the raw URL with a warning
+
+import { extractYouTubeIdentifier, buildLiveEmbedUrl } from './youtube.js';
 
 // ---------- helpers ----------
-
-const YT_CHANNEL_ID_RE = /^UC[\w-]{20,}$/;
-
-function getYouTubeVideoId(url) {
-  // matches youtube.com/watch?v=ID, youtu.be/ID, youtube.com/embed/ID, /shorts/ID, /live/ID
-  const patterns = [
-    /[?&]v=([\w-]{6,})/,
-    /youtu\.be\/([\w-]{6,})/,
-    /youtube\.com\/embed\/([\w-]{6,})/,
-    /youtube\.com\/shorts\/([\w-]{6,})/,
-    /youtube\.com\/live\/([\w-]{6,})/
-  ];
-  for (const re of patterns) {
-    const m = url.match(re);
-    if (m && m[1] !== 'live_stream') return m[1];
-  }
-  return null;
-}
-
-function getYouTubeChannelId(url) {
-  // e.g. https://www.youtube.com/channel/UCxxxxxxxxxxxxxxxxxxxxxx
-  const m = url.match(/youtube\.com\/channel\/(UC[\w-]+)/);
-  if (m) return m[1];
-  // already-embedded channel-live URL
-  const m2 = url.match(/[?&]channel=(UC[\w-]+)/);
-  if (m2) return m2[1];
-  return null;
-}
 
 function getVimeoEventId(url) {
   // https://vimeo.com/event/12345 or /event/12345/embed
@@ -68,12 +44,17 @@ function getFacebookPageId(url) {
  * Given whatever the church admin pastes (or stores), figure out what kind of
  * stream it is and return both an embed URL and metadata about its behavior.
  *
+ * Synchronous — for @handle / /c/ / /user/ URLs we recognize the form but
+ * cannot produce an embed URL without resolving via the YouTube Data API
+ * first. Use resolveYouTubeChannel() (async) for those.
+ *
  * @param {string} input  Channel ID, watch URL, embed URL, Vimeo URL, etc.
  * @returns {{
  *   strategy: string,
  *   embedUrl: string|null,
- *   autoLive: boolean,        // true = embed itself follows live status
- *   warning: string|null
+ *   autoLive: boolean,
+ *   warning: string|null,
+ *   needsResolution?: boolean
  * }}
  */
 export function parseStreamUrl(input) {
@@ -82,33 +63,32 @@ export function parseStreamUrl(input) {
     return { strategy: 'unknown', embedUrl: null, autoLive: false, warning: 'Empty URL' };
   }
 
-  // Bare YouTube channel ID
-  if (YT_CHANNEL_ID_RE.test(raw)) {
+  const yt = extractYouTubeIdentifier(raw);
+
+  if (yt?.kind === 'channelId') {
     return {
       strategy: 'youtube-channel-live',
-      embedUrl: `https://www.youtube.com/embed/live_stream?channel=${raw}`,
+      embedUrl: buildLiveEmbedUrl(yt.value),
       autoLive: true,
       warning: null
     };
   }
 
-  // YouTube channel URL
-  const ytChan = getYouTubeChannelId(raw);
-  if (ytChan) {
+  if (yt?.kind === 'handle' || yt?.kind === 'customUrl' || yt?.kind === 'username') {
     return {
-      strategy: 'youtube-channel-live',
-      embedUrl: `https://www.youtube.com/embed/live_stream?channel=${ytChan}`,
+      strategy: 'youtube-channel-handle',
+      embedUrl: null,
       autoLive: true,
-      warning: null
+      needsResolution: true,
+      warning:
+        'Resolve this URL to a permanent channel ID for a stable live embed.'
     };
   }
 
-  // YouTube video (watch / shorts / embed / youtu.be / live)
-  const ytVid = getYouTubeVideoId(raw);
-  if (ytVid) {
+  if (yt?.kind === 'video') {
     return {
       strategy: 'youtube-video',
-      embedUrl: `https://www.youtube.com/embed/${ytVid}`,
+      embedUrl: `https://www.youtube.com/embed/${yt.value}`,
       autoLive: false,
       warning: null
     };
@@ -173,6 +153,8 @@ export function describeStrategy(strategy) {
   switch (strategy) {
     case 'youtube-channel-live':
       return 'Auto-follows whatever this YouTube channel is broadcasting right now. No updates needed when they go live.';
+    case 'youtube-channel-handle':
+      return "YouTube handle / custom URL. Click Resolve to fetch the channel's permanent ID and lock in a stable live embed.";
     case 'youtube-video':
       return 'Plays this specific YouTube video. To always show the current live stream, paste the channel URL instead.';
     case 'vimeo-event':
