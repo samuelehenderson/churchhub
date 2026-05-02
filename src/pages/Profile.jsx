@@ -1,8 +1,11 @@
 import React from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { MapContainer, TileLayer, Marker } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
 import { useChurch } from '../hooks/useChurches.js';
 import LiveEmbed from '../components/LiveEmbed.jsx';
 import { getPlatform } from '../data/socials.jsx';
+import { buildPinIcon } from '../components/mapPin.js';
 import {
   IconArrowLeft, IconPin, IconClock, IconPhone, IconMail, IconGlobe,
   IconHeart, IconHand, IconWave, IconUsers, IconPlay
@@ -104,10 +107,34 @@ export default function Profile() {
 
           <section className="profile-section card" style={{ marginBottom: 18 }}>
             <h3>Location</h3>
-            <div className="map-placeholder" style={{ aspectRatio: '4 / 3' }}>
-              <div className="dot" style={{ position: 'static' }} />
-              <div className="map-note">Map integration coming soon</div>
-            </div>
+            {typeof church.lat === 'number' && typeof church.lng === 'number' ? (
+              <div
+                style={{
+                  aspectRatio: '4 / 3',
+                  borderRadius: 'var(--radius)',
+                  overflow: 'hidden',
+                  border: '1px solid var(--line)',
+                }}
+              >
+                <MapContainer
+                  center={[church.lat, church.lng]}
+                  zoom={13}
+                  scrollWheelZoom={false}
+                  style={{ width: '100%', height: '100%' }}
+                >
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                    subdomains="abcd"
+                  />
+                  <Marker position={[church.lat, church.lng]} icon={buildPinIcon(true)} />
+                </MapContainer>
+              </div>
+            ) : (
+              <div className="map-placeholder" style={{ aspectRatio: '4 / 3' }}>
+                <div className="map-note">Coordinates not yet set for this church</div>
+              </div>
+            )}
             <p style={{ marginTop: 10, fontSize: '0.9rem', color: 'var(--ink-soft)' }}>
               <IconPin width="14" height="14" style={{ verticalAlign: 'middle', marginRight: 4 }} />
               {church.address}

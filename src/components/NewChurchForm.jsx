@@ -59,10 +59,40 @@ export default function NewChurchForm({ onCreated, onCancel }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [resolvedYouTube, setResolvedYouTube] = useState(null);
+  const [geocoding, setGeocoding] = useState(false);
+  const [geocodeMsg, setGeocodeMsg] = useState(null);
 
   const onChange = (e) => {
     const { name, value, type, checked } = e.target;
     setForm({ ...form, [name]: type === 'checkbox' ? checked : value });
+  };
+
+  // Geocode the address using Nominatim (OpenStreetMap). Free, no key required.
+  // Falls back to "city, state" if no address is set.
+  const onGeocode = async () => {
+    const query = form.address?.trim() || `${form.city}, ${form.state}`.trim().replace(/^,\s*/, '');
+    if (!query || query === ',') {
+      setGeocodeMsg('Enter an address (or at least city + state) first.');
+      return;
+    }
+    setGeocoding(true);
+    setGeocodeMsg(null);
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=${encodeURIComponent(query)}`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const json = await res.json();
+      if (Array.isArray(json) && json.length > 0) {
+        const { lat, lon } = json[0];
+        setForm((f) => ({ ...f, lat: String(lat), lng: String(lon) }));
+        setGeocodeMsg(`Found: ${parseFloat(lat).toFixed(4)}, ${parseFloat(lon).toFixed(4)}`);
+      } else {
+        setGeocodeMsg('No match — try a more specific address.');
+      }
+    } catch (err) {
+      setGeocodeMsg('Lookup failed — check your connection and try again.');
+    } finally {
+      setGeocoding(false);
+    }
   };
 
   // Auto-fill the slug as the user types name/city, but only if they haven't
@@ -227,6 +257,20 @@ export default function NewChurchForm({ onCreated, onCancel }) {
           <label>Longitude</label>
           <input name="lng" value={form.lng} onChange={onChange} placeholder="-82.1401" />
         </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: -8, marginBottom: 12, flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          onClick={onGeocode}
+          disabled={geocoding}
+          className="btn btn-ghost"
+          style={{ padding: '6px 14px', fontSize: '0.85rem' }}
+        >
+          {geocoding ? 'Looking up…' : 'Look up coordinates from address'}
+        </button>
+        {geocodeMsg && (
+          <span style={{ fontSize: '0.82rem', color: 'var(--ink-muted)' }}>{geocodeMsg}</span>
+        )}
       </div>
 
       <div className="field">

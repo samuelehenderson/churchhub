@@ -61,6 +61,8 @@ function churchToForm(c) {
     name: c.name,
     description: c.description,
     address: c.address,
+    lat: c.lat != null ? String(c.lat) : '',
+    lng: c.lng != null ? String(c.lng) : '',
     times: c.serviceTimes.join('\n'),
     liveChannelUrl: channelInput,
     livestream: c.livestreamUrl,
@@ -97,10 +99,14 @@ function formToPatch(form, resolvedYouTube) {
     ? resolvedYouTube.embedUrl
     : form.liveChannelUrl.trim();
 
+  const latNum = form.lat ? parseFloat(form.lat) : null;
+  const lngNum = form.lng ? parseFloat(form.lng) : null;
   return {
     name: form.name.trim(),
     description: form.description.trim(),
     address: form.address.trim(),
+    lat: Number.isFinite(latNum) ? latNum : null,
+    lng: Number.isFinite(lngNum) ? lngNum : null,
     serviceTimes: form.times.split('\n').map((s) => s.trim()).filter(Boolean),
     liveChannelUrl,
     youtubeChannelId: resolvedYouTube?.channelId || null,
@@ -194,6 +200,35 @@ export default function Admin() {
   const [resolvedYouTube, setResolvedYouTube] = useState(() =>
     church ? existingResolved(church) : null
   );
+  const [geocoding, setGeocoding] = useState(false);
+  const [geocodeMsg, setGeocodeMsg] = useState(null);
+
+  const onGeocode = async () => {
+    if (!form) return;
+    const query = form.address?.trim() || `${church?.city || ''}, ${church?.state || ''}`.trim().replace(/^,\s*/, '');
+    if (!query || query === ',') {
+      setGeocodeMsg('Enter an address first.');
+      return;
+    }
+    setGeocoding(true);
+    setGeocodeMsg(null);
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=${encodeURIComponent(query)}`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const json = await res.json();
+      if (Array.isArray(json) && json.length > 0) {
+        const { lat, lon } = json[0];
+        setForm((f) => ({ ...f, lat: String(lat), lng: String(lon) }));
+        setGeocodeMsg(`Found: ${parseFloat(lat).toFixed(4)}, ${parseFloat(lon).toFixed(4)}`);
+      } else {
+        setGeocodeMsg('No match — try a more specific address.');
+      }
+    } catch {
+      setGeocodeMsg('Lookup failed — check your connection and try again.');
+    } finally {
+      setGeocoding(false);
+    }
+  };
 
   useEffect(() => {
     if (church) {
@@ -375,6 +410,30 @@ export default function Admin() {
                     <div className="field">
                       <label>Address</label>
                       <input name="address" value={form.address} onChange={onChange} />
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <div className="field">
+                        <label>Latitude</label>
+                        <input name="lat" value={form.lat} onChange={onChange} placeholder="29.1872" />
+                      </div>
+                      <div className="field">
+                        <label>Longitude</label>
+                        <input name="lng" value={form.lng} onChange={onChange} placeholder="-82.1401" />
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: -4, marginBottom: 14, flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={onGeocode}
+                        disabled={geocoding}
+                        className="btn btn-ghost"
+                        style={{ padding: '6px 14px', fontSize: '0.85rem' }}
+                      >
+                        {geocoding ? 'Looking up…' : 'Look up coordinates from address'}
+                      </button>
+                      {geocodeMsg && (
+                        <span style={{ fontSize: '0.82rem', color: 'var(--ink-muted)' }}>{geocodeMsg}</span>
+                      )}
                     </div>
                     <div className="field">
                       <label>About</label>

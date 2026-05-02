@@ -30,6 +30,12 @@ let fetchPromise = null;
 // ---------- shape conversion ----------
 
 // Postgres returns snake_case column names; the rest of the app expects camelCase.
+// Postgres `numeric` types come back from Supabase as strings — coerce to number.
+function asNumber(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = typeof v === 'number' ? v : parseFloat(v);
+  return Number.isFinite(n) ? n : null;
+}
 function fromRow(row) {
   return {
     id: row.id,
@@ -40,8 +46,8 @@ function fromRow(row) {
     size: row.size,
     description: row.description,
     address: row.address,
-    lat: row.lat,
-    lng: row.lng,
+    lat: asNumber(row.lat),
+    lng: asNumber(row.lng),
     serviceTimes: row.service_times || [],
     online: !!row.online,
     isLive: !!row.is_live,
