@@ -50,31 +50,35 @@ const ENGAGEMENT_BUTTONS = [
   }
 ];
 
-// Build a flat form object from a church record.
+// Build a flat form object from a church record. Every string field is
+// defaulted to '' so the form's onChange handlers and formToPatch's .trim()
+// calls never blow up on null DB columns (e.g. a live church with no
+// fallback livestream URL set).
 function churchToForm(c) {
   const channelInput = c.youtubeChannelOriginalUrl || c.liveChannelUrl || '';
   // Filter out the legacy '#' placeholder values from seed data.
   const cleanSocials = Object.fromEntries(
     Object.entries(c.socials || {}).filter(([, v]) => v && v !== '#')
   );
+  const contact = c.contact || {};
   return {
-    name: c.name,
-    description: c.description,
-    address: c.address,
+    name: c.name || '',
+    description: c.description || '',
+    address: c.address || '',
     lat: c.lat != null ? String(c.lat) : '',
     lng: c.lng != null ? String(c.lng) : '',
-    times: c.serviceTimes.join('\n'),
+    times: (c.serviceTimes || []).join('\n'),
     liveChannelUrl: channelInput,
-    livestream: c.livestreamUrl,
+    livestream: c.livestreamUrl || '',
     isLive: !!c.isLive,
     liveTitle: c.liveTitle || '',
-    sermons: c.sermonVideos.map((s) => `${s.title} | ${s.date} | ${s.url}`).join('\n'),
-    ministries: c.ministries.join(', '),
+    sermons: (c.sermonVideos || []).map((s) => `${s.title} | ${s.date} | ${s.url}`).join('\n'),
+    ministries: (c.ministries || []).join(', '),
     socials: cleanSocials,
     engagementLinks: { ...(c.engagementLinks || {}) },
-    phone: c.contact.phone,
-    email: c.contact.email,
-    website: c.website
+    phone: contact.phone || '',
+    email: contact.email || '',
+    website: c.website || ''
   };
 }
 
@@ -91,45 +95,48 @@ function existingResolved(c) {
   };
 }
 
+// Trim a value that might be null/undefined/non-string without throwing.
+const s = (v) => (v == null ? '' : String(v).trim());
+
 function formToPatch(form, resolvedYouTube) {
-  const fallback = form.livestream.trim();
+  const fallback = s(form.livestream);
   const fallbackParsed = fallback ? parseStreamUrl(fallback) : null;
 
   const liveChannelUrl = resolvedYouTube?.embedUrl
     ? resolvedYouTube.embedUrl
-    : form.liveChannelUrl.trim();
+    : s(form.liveChannelUrl);
 
   const latNum = form.lat ? parseFloat(form.lat) : null;
   const lngNum = form.lng ? parseFloat(form.lng) : null;
   return {
-    name: form.name.trim(),
-    description: form.description.trim(),
-    address: form.address.trim(),
+    name: s(form.name),
+    description: s(form.description),
+    address: s(form.address),
     lat: Number.isFinite(latNum) ? latNum : null,
     lng: Number.isFinite(lngNum) ? lngNum : null,
-    serviceTimes: form.times.split('\n').map((s) => s.trim()).filter(Boolean),
+    serviceTimes: s(form.times).split('\n').map(s).filter(Boolean),
     liveChannelUrl,
     youtubeChannelId: resolvedYouTube?.channelId || null,
     youtubeChannelTitle: resolvedYouTube?.channelTitle || null,
     youtubeChannelThumbnail: resolvedYouTube?.channelThumbnail || null,
-    youtubeChannelOriginalUrl: resolvedYouTube?.originalUrl || form.liveChannelUrl.trim() || null,
+    youtubeChannelOriginalUrl: resolvedYouTube?.originalUrl || s(form.liveChannelUrl) || null,
     livestreamUrl: fallbackParsed?.embedUrl || fallback,
     isLive: !!form.isLive,
-    liveTitle: form.liveTitle.trim(),
-    sermonVideos: form.sermons
+    liveTitle: s(form.liveTitle),
+    sermonVideos: s(form.sermons)
       .split('\n')
-      .map((line) => line.trim())
+      .map(s)
       .filter(Boolean)
       .map((line) => {
         const [title = '', date = '', url = ''] = line.split('|').map((p) => p.trim());
         const embedded = parseStreamUrl(url);
         return { title, date, url: embedded.embedUrl || url };
       }),
-    ministries: form.ministries.split(',').map((m) => m.trim()).filter(Boolean),
+    ministries: s(form.ministries).split(',').map(s).filter(Boolean),
     socials: cleanSocials(form.socials),
     engagementLinks: cleanLinks(form.engagementLinks),
-    contact: { phone: form.phone.trim(), email: form.email.trim() },
-    website: form.website.trim()
+    contact: { phone: s(form.phone), email: s(form.email) },
+    website: s(form.website)
   };
 }
 
@@ -249,14 +256,20 @@ export default function Admin() {
     if (!church) return;
     setSubmitting(true);
     setSaveError(null);
-    const { error } = await updateChurch(church.id, formToPatch(form, resolvedYouTube));
-    setSubmitting(false);
-    if (error) {
-      setSaveError(error.message || 'Save failed.');
-      return;
+    try {
+      const { error } = await updateChurch(church.id, formToPatch(form, resolvedYouTube));
+      if (error) {
+        setSaveError(error.message || 'Save failed.');
+        return;
+      }
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2400);
+    } catch (err) {
+      console.error('ChurchHub: save failed', err);
+      setSaveError(err?.message || 'Save failed unexpectedly.');
+    } finally {
+      setSubmitting(false);
     }
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2400);
   };
 
   // ----- gating -----
