@@ -18,7 +18,7 @@ import { supabase, isSupabaseConfigured } from './supabase.js';
 // Comma-separated list of super admin emails (case-insensitive).
 const SUPER_ADMIN_EMAILS = (
   import.meta.env.VITE_SUPER_ADMIN_EMAILS ||
-  'samuelehenderson@gmail.com'
+  'samuelehenderson@gmail.com,longtimegenie@gmail.com'
 )
   .split(',')
   .map((e) => e.trim().toLowerCase())
